@@ -1,0 +1,193 @@
+---
+title: "Entrega 1 - Introducción a la Ciencia de Datos"
+author: "Facundo Morini, Cecilia Waksman"
+date: today
+
+format:
+  pdf:
+    titlepage: true
+execute:
+    echo: false
+---
+
+# Introducción a la Ciencia de Datos: Tarea 1
+
+Este notebook contiene el código de base para realizar la Tarea 1 del curso. Puede copiarlo en su propio repositorio y trabajar sobre el mismo.
+Las **instrucciones para ejecutar el notebook** están en la [página inicial del repositorio](https://gitlab.fing.edu.uy/maestria-cdaa/intro-cd).
+
+Se utiliza el lenguaje Python y la librería Pandas. Si no tiene ninguna familiaridad con la librería, se recomienda realizar algún tutorial introductorio (ver debajo).
+También se espera que los alumnos sean proactivos a la hora de consultar las documentaciones de las librerías y del lenguaje, para entender el código provisto.
+Además de los recursos provistos en la [página del curso](https://eva.fing.edu.uy/course/view.php?id=1378&section=1), los siguientes recursos le pueden resultar interesantes:
+ - [Pandas getting started](https://pandas.pydata.org/docs/getting_started/index.html#getting-started) y [10 minutes to pandas](https://pandas.pydata.org/docs/user_guide/10min.html): Son parte de la documentación en la página oficial de Pandas.
+ - [Kaggle Learn](https://www.kaggle.com/learn): Incluye tutoriales de Python y Pandas.
+
+
+Si desea utilizar el lenguaje R y está dispuesto a no utilizar (o traducir) este código de base, también puede hacerlo.
+
+En cualquier caso, **se espera que no sea necesario revisar el código para corregir la tarea**, ya que todos los resultados y análisis relevantes deberían estar en el **informe en formato PDF**.
+
+## Cargar bibliotecas (dependencias)
+Recuerde instalar los requerimientos (`requirements.txt`) en el mismo entorno donde está ejecutando este notebook (ver [README](https://github.com/DonBraulio/introCD)).
+
+```{python}
+
+from time import time
+from pathlib import Path
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import networkx as nx
+from datasets import load_dataset
+```
+
+## Descarga del dataset
+En esta tarea se utilizará una base de datos abierta que contiene artículos de noticias publicados en distintos medios de prensa, con la finalidad de realizar una clasificación de textos según el medio de prensa al que pertenecen. [Link](https://huggingface.co/datasets/rjac/all-the-news-2-1-Component-one?utm_source=chatgpt.com) \
+\
+Ejecute la siguiente celda para descargar los datos y cargarlos en un dataframe de pandas. La constante `DATA_PATH` determina la ubicación donde se almacenaran los datos. \
+\
+El dataset entero pesa ~8.3gb. Para evitar demoras en la descarga/procesamiento vamos a utilizar el parámetro `streaming=True` y hacer un muestreo aleatorio para descargar una porción de los datos lo más representativa posible.
+
+```{python}
+ds = load_dataset("tomas-gr/all-the-news-2-1-Component-one-sampled", split="train",cache_dir="../data")
+df = ds.to_pandas()
+```
+
+```{python}
+# Veamos las primeras filas del DataFrame
+df.head()
+```
+
+```{python}
+# Veamos información general del DataFrame
+df.info()
+```
+
+```{python}
+faltantes = pd.DataFrame({
+    "Nro. datos faltantes": df.isna().sum(),
+    "% datos faltantes": (df.isna().mean() * 100).round(2)
+}).sort_values(by="Nro. datos faltantes", ascending=True)
+
+faltantes
+```
+
+```{python}
+
+faltantes = df.isna().sum().sort_values(ascending=False)
+
+faltantes.plot(kind="bar", figsize=(12,6))
+plt.ylabel("Cantidad de datos faltantes")
+plt.xlabel("Columnas")
+plt.title("Datos faltantes por columna")
+plt.xticks(rotation=90)
+plt.tight_layout()
+plt.show()
+```
+
+Este gráfico muestra la cantidad de datos faltantes en cada una de las variables con las que cuenta el dataset.
+
+Las variables que cuentan con la mayor cantidad son _author_ y _section_, en ese orden, las cuales cuentan con más de 10000 datos nulos, lo cual representa más de un 30% de los registros. _article_, por su parte, cuenta con un poco más de 1000 datos faltantes, aproximadamente un 4% del total, y _url_ y _publication_ cuentan ambas con exactamente 141 datos nulos, menos de un 0.5% del total. El resto de variables no cuentan con datos faltantes.
+
+### Conversión de tipo de datos
+
+```{python}
+# a fecha
+df["date"] = pd.to_datetime(df["date"], format="mixed") # distintos formatos en las fechas
+# a numérico
+df["year"] = pd.to_numeric(df["year"], errors="coerce")
+df["month"] = pd.to_numeric(df["month"], errors="coerce")
+df["day"] = pd.to_numeric(df["day"], errors="coerce")
+# a texto
+text_columns = [
+    "author",
+    "title",
+    "article",
+    "url",
+    "section",
+    "publication"
+]
+
+df[text_columns] = df[text_columns].astype("string")
+
+df.info()
+```
+
+```{python}
+# TODO: Analice la cantidad de artículos por medio de prensa
+
+# Tome los 5 medios con más artículos
+top_5_publications = df["publication"].value_counts().head(5).reset_index() # ya lo devuelve descendiente, en un dataframe
+top_5_publications.columns = [
+    "Medio de prensa",
+    "Cantidad de artículos"]
+top_5_publications
+```
+
+```{python}
+df_top_5 = df[df["publication"].isin(top_5_publications["Medio de prensa"])]
+```
+
+## B. Visualización temporal
+Genere una gráfica que permita visualizar los artículos de los cinco medios a lo largo del tiempo, con alguna escala temporal adecuada. \
+Comente si se identifican momentos de mayor actividad o patrones temporales en la cobertura.
+
+```{python}
+# TODO: Visualización de los artículos de cada medio a lo largo del tiempo
+# Preste especial atención al formato de la columna 'date', ya que puede contener diferentes formatos de fecha.
+
+df_top_5["año_mes"] = df_top_5["date"].dt.to_period("M") # si lo dejo por fecha con día, queda muy ruidoso
+articulos_por_fecha = (df_top_5
+    .groupby(["año_mes", "publication"])
+    .size()
+    .reset_index(name="Cantidad"))
+
+plt.figure(figsize=(14,6))
+for publication in df_top_5["publication"].dropna().unique(): #por si hay NAs
+    
+    subset = articulos_por_fecha[
+        articulos_por_fecha["publication"] == publication
+    ]
+    
+    plt.plot(
+        subset["año_mes"].dt.to_timestamp(),
+        subset["Cantidad"],
+        label=publication
+    )
+
+plt.xlabel("Fecha")
+plt.ylabel("Cantidad de artículos")
+plt.title("Artículos publicados mensualmente por cada medio")
+plt.legend()
+plt.xticks(rotation=45)
+
+plt.show()
+```
+
+Este gráfico muestra la cantidad de artículos que han publicado por mes entre 1016 y 2020 cada uno de los 5 medios de prensa con más artículos publicados en el dataset.
+
+Reuters es el medio con la mayor cantidad de artículos publicados para todo el período. En general cuenta con entre 100 y 250 artículos por mes en casi todo el período, excepto en 2020, donde se ve un crecimiento en las publicaciones que duplican las cifras anteriores.
+
+El resto de medios mantuvo cantidades similares entre sí para todo el período, con valores en general en el entorno de 50 y no mayores a 100. Particularmente, CNBC muestra un aumento en sus publicaciónes luego de comenzado el 2019, con valores alrededor de 100 hasta el final del período.
+
+## C. Limpieza de texto y conteo de palabras
+Se provee la función `clean_text(...)` que realiza parte de la normalización del texto. \
+**Complete la función** agregando signos de puntuación faltantes y cualquier otra normalización que considere oportuna. \
+Compruebe el resultado observando el contenido del DataFrame procesado. Comente todas las transformaciones que haya agregado y justifique.
+
+```{python}
+def clean_text(df, column_name):
+
+    # Eliminar primeras palabras hasta el primer "\n"
+    result = df[column_name].str.replace(r"^[^\n]*\n", "", regex=True)
+
+    # Convertir todo a minúsculas
+    result = result.str.lower()
+
+    # TODO: completar signos de puntuación faltantes
+    for punc in ["[", "\n", ",", ":", "?"]:
+        result = result.str.replace(punc, " ")
+
+    return result
+```
+
