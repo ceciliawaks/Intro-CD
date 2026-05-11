@@ -8,6 +8,8 @@ format:
     titlepage: true
 execute:
     echo: false
+    warning: false
+    message: false
 ---
 
 # Introducción a la Ciencia de Datos: Tarea 1
@@ -29,6 +31,13 @@ En cualquier caso, **se espera que no sea necesario revisar el código para corr
 ## Cargar bibliotecas (dependencias)
 Recuerde instalar los requerimientos (`requirements.txt`) en el mismo entorno donde está ejecutando este notebook (ver [README](https://github.com/DonBraulio/introCD)).
 
+```{r}
+
+Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
+
+library(reticulate)
+```
+
 ```{python}
 
 from time import time
@@ -39,6 +48,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import networkx as nx
 from datasets import load_dataset
+import re
+import string
+from sklearn.feature_extraction.text import CountVectorizer, ENGLISH_STOP_WORDS
 ```
 
 ## Descarga del dataset
@@ -53,6 +65,8 @@ ds = load_dataset("tomas-gr/all-the-news-2-1-Component-one-sampled", split="trai
 df = ds.to_pandas()
 ```
 
+## Lectura de Datos
+
 ```{python}
 # Veamos las primeras filas del DataFrame
 df.head()
@@ -62,6 +76,13 @@ df.head()
 # Veamos información general del DataFrame
 df.info()
 ```
+
+# Parte 1: Cargado y Limpieza de Datos
+
+## A. Exploración de Datos
+
+Analice el contenido del DataFrame. Reporte si existen datos faltantes en algún campo, o cualquier otro problema de calidad de datos que encuentre. \
+En particular, analice la cantidad de artículos por medio de prensa, y a partir de este punto trabaje con los **cinco medios con mayor cantidad de artículos**.
 
 ```{python}
 faltantes = pd.DataFrame({
@@ -113,6 +134,7 @@ df[text_columns] = df[text_columns].astype("string")
 df.info()
 ```
 
+### 5 medios de prensa con más artículos publicados
 ```{python}
 # TODO: Analice la cantidad de artículos por medio de prensa
 
@@ -129,7 +151,8 @@ df_top_5 = df[df["publication"].isin(top_5_publications["Medio de prensa"])]
 ```
 
 ## B. Visualización temporal
-Genere una gráfica que permita visualizar los artículos de los cinco medios a lo largo del tiempo, con alguna escala temporal adecuada. \
+Genere una gráfica que permita visualizar los artículos de los cinco medios a lo largo del tiempo, con alguna escala temporal adecuada.
+
 Comente si se identifican momentos de mayor actividad o patrones temporales en la cobertura.
 
 ```{python}
@@ -178,16 +201,280 @@ Compruebe el resultado observando el contenido del DataFrame procesado. Comente 
 ```{python}
 def clean_text(df, column_name):
 
-    # Eliminar primeras palabras hasta el primer "\n"
-    result = df[column_name].str.replace(r"^[^\n]*\n", "", regex=True)
+    # Eliminar encabezado hasta el primer salto de línea
+    result = df[column_name].str.replace(
+        r"^[^\n]*\n",
+        "",
+        regex=True
+    )
 
-    # Convertir todo a minúsculas
+    # Minúsculas
     result = result.str.lower()
 
-    # TODO: completar signos de puntuación faltantes
-    for punc in ["[", "\n", ",", ":", "?"]:
-        result = result.str.replace(punc, " ")
+    # Reemplazar puntuación y saltos de línea por espacios
+    punctuation = re.escape(string.punctuation + "—–¿¡«»")
+    result = result.str.replace(
+        f"[{punctuation}\\n]",
+        " ",
+        regex=True
+    )
+
+    # Eliminar palabras que contengan caracteres no permitidos
+    result = result.str.replace(
+        r"\b\S*[^a-zA-Z\sáéíóúüñ]\S*\b",
+        "",
+        regex=True
+    )
+
+    # Eliminar espacios múltiples
+    result = result.str.replace(
+        r"\s+",
+        " ",
+        regex=True
+    ).str.strip()
 
     return result
 ```
+
+```{python}
+df_top_5["CleanText"]=clean_text(df_top_5, "article")
+df_top_5[["article", "CleanText"]].head(6)
+```
+
+Se quitaron todos los símbolos listados en _string.punctuation_ así como también algunos otros símbolos y se sustituyeron por un espacio. Luego se eliminaron números y palabras con caracteres usados fuera del idioma inglés, ya que la mayoría de las publicaciónes son en este idioma. La razón detrás de esta decisión, suponiendo que se quisiera crear un modelo para predecir por ejemplo el tema de un artículo, es mejorar la eficiencia en la predicción del mismo quitando un componente extra de ruido o variabilidad. Por último, se eliminan múltiples espacios continuos.
+
+```{python}
+## Pendiente: revisar lista y eliminar emojis
+
+# from collections import Counter
+# import unicodedata as ud
+# col = "CleanText"  
+# s = df_top_5[col].fillna("").astype(str)
+# counts = Counter("".join(s))
+# chars = pd.DataFrame([
+#     {
+#         "char": ch,
+#         "categoria": ud.category(ch),
+#         "conteo": n
+#     }
+#     for ch, n in counts.items()
+# ]).sort_values("conteo", ascending=False)
+# chars
+```
+
+### D. Elección de campos de texto
+
+Discuta si conviene trabajar con:
+- sólo el cuerpo del artículo,
+- sólo el título,
+- o una combinación de ambos.
+
+Justifique brevemente su decisión.
+
+Aplicando la misma limpieza sobre el título que se usó sobre el artículo, se puede trabajar con ambos. Quizás es conveniente trabajar con ambas variables separadas, ya que el título contiene la idea principal detrás del correspondiente artículo.
+
+## E. Pistas que identifican al medio de prensa
+
+Analice si en el texto aparecen pistas que identifiquen de manera directa al medio de prensa (nombres del medio, URLs, firmas, nombres de secciones, plantillas repetidas, etc.).
+
+En caso de encontrarlas, comente si considera conveniente eliminarlas o reducir su impacto, y justifique su decisión.
+
+```{python}
+## Pendiente: pistas que identifiquen de manera directa al medio de prensa
+```
+
+Si la finalidad fuera generar un modelo para predecir el medio de prensa, entonces es necesario eliminarlo, de otra forma, dicho modelo simplemente se centraría en buscar en el texto si está escrito el medio.
+
+También convendría eliminarlo en el caso de que distintos medios se centraran cada uno en temas específicos. Si la finalidad es que el modelo pueda distinguir entre temas según las palabras más repetidas del artículo, si se encuentra el nombre del medio, esto sería muy determinante sobre el temas.
+
+## F. Restricción por sección o período temporal
+
+Evalúe si conviene restringir el análisis a artículos de una misma sección temática o de un período temporal acotado, con el objetivo de reducir el efecto del tema sobre una futura tarea de clasificación por medio.
+
+No es necesario implementar esta restricción, pero sí discutir sus posibles ventajas y desventajas.
+
+```{python}
+## Pendiente F.
+```
+
+
+# Parte 2: Conteo de Palabras y Visualizaciones
+
+## A. Palabras más frecuentes por medio
+
+Realice una visualización que permita comparar las palabras más frecuentes de cada uno de los cinco medios de prensa.
+
+Sin necesidad de implementarlo, proponga ideas para modificar esta visualización con el fin de encontrar diferencias entre secciones temáticas, fechas, o tipos de noticias.
+
+```{python}
+def plot_top_words_by_publication(df, text_col="CleanText", pub_col="publication", top_n=10):
+    rows = []
+
+    for publication, group in df.groupby(pub_col):
+        texts = group[text_col].dropna().astype(str)
+
+        vectorizer = CountVectorizer()
+        word_matrix = vectorizer.fit_transform(texts)
+
+        word_counts = word_matrix.sum(axis=0).A1
+        words = vectorizer.get_feature_names_out()
+
+        freq_df = pd.DataFrame({
+            "publication": publication,
+            "word": words,
+            "count": word_counts
+        })
+
+        freq_df = freq_df.sort_values("count", ascending=False).head(top_n)
+        rows.append(freq_df)
+
+    top_words_df = pd.concat(rows, ignore_index=True)
+
+    publications = top_words_df["publication"].unique()
+    n_publications = len(publications)
+
+    fig, axes = plt.subplots(
+        nrows=n_publications,
+        ncols=1,
+        figsize=(10, 4 * n_publications)
+    )
+
+    if n_publications == 1:
+        axes = [axes]
+
+    for ax, publication in zip(axes, publications):
+        data = top_words_df[top_words_df["publication"] == publication]
+        data = data.sort_values("count", ascending=True)
+
+        ax.barh(data["word"], data["count"])
+        ax.set_title(f"Palabras más frecuentes - {publication}")
+        ax.set_xlabel("Frecuencia")
+        ax.set_ylabel("Palabra")
+
+    plt.tight_layout()
+    plt.show()
+
+    return top_words_df
+```
+
+```{python}
+top_words_df = plot_top_words_by_publication(
+    df_top_5,
+    text_col="CleanText",
+    pub_col="publication",
+    top_n=10
+)
+# - ¿Encuentra algún problema en los resultados?
+```
+
+Existen palabras que no aportan contexto sobre el artículo, si no que sirven para dar estructura al texto. La mayoría de las palabras más frecuentes para cada medio pertenecen a este grupo de palabras, llamadas "stopwords" o "palabras vacías".
+
+Para solventar el problema, recurrimos a la librería scikit-learn permite listar hasta 318 stopwords, que posteriormente filtramos.
+
+```{python}
+stopwords = list(ENGLISH_STOP_WORDS) + ["s", "u", "say", "said"]
+
+df_top_5["CleanText"] = (
+    df_top_5["CleanText"]
+    .str.replace(
+        r"\b(" + "|".join(stopwords) + r")\b",
+        "",
+        regex=True
+    )
+    .str.replace(r"\s+", " ", regex=True)
+    .str.strip()
+)
+```
+
+una forma más visual de ver las palabras más frecuentes es mediante _Wordclouds_. A continuación mostramos las 50 palabras más frecuentes en cada uno de los 5 medios.
+
+```{python}
+from wordcloud import WordCloud
+import math
+
+def plot_wordclouds_by_publication(
+    df,
+    text_col="CleanText",
+    pub_col="publication",
+    max_words=100,
+    stopwords=None,
+    cols=2,
+    figsize=(14, 6)
+):
+    publications = df[pub_col].dropna().unique()
+    n_publications = len(publications)
+    rows = math.ceil(n_publications / cols)
+
+    fig, axes = plt.subplots(rows, cols, figsize=(figsize[0], figsize[1] * rows))
+    
+    # Asegurar que axes siempre sea iterable
+    if rows == 1 and cols == 1:
+        axes = [axes]
+    else:
+        axes = axes.flatten()
+
+    for i, publication in enumerate(publications):
+        text = " ".join(
+            df.loc[df[pub_col] == publication, text_col]
+            .dropna()
+            .astype(str)
+        )
+
+        wordcloud = WordCloud(
+            width=800,
+            height=400,
+            background_color="white",
+            stopwords=stopwords,
+            max_words=max_words
+        ).generate(text)
+
+        axes[i].imshow(wordcloud, interpolation="bilinear")
+        axes[i].set_title(f"Word Cloud - {publication}")
+        axes[i].axis("off")
+
+    # Ocultar ejes vacíos
+    for j in range(i + 1, len(axes)):
+        axes[j].axis("off")
+
+    plt.tight_layout()
+    plt.show()
+```
+
+
+```{python}
+plot_wordclouds_by_publication(
+    df_top_5,
+    max_words=50
+)
+```
+
+
+## B. Medios con mayor cantidad de palabras
+Corra el código que permite encontrar los medios con mayor cantidad de palabras. \
+En caso de encontrar algún problema luego de realizar la visualización, comente a qué se debe y proponga formas de resolverlo.
+
+```{python}
+# TODO: Busque los medios con mayor cantidad de palabras
+```
+
+## C. Matriz de menciones entre medios
+Construya una matriz de 5×5, donde cada fila y columna corresponden a un medio de prensa, y la entrada (i,j) contiene la cantidad de veces que el medio *i* menciona al medio *j*. \
+\
+**Opcional:** genere un grafo dirigido con esa matriz de adyacencia para visualizar las menciones. Puede ser útil la biblioteca `networkx`.
+
+```{python}
+# TODO: Construya una matriz de 5x5, donde cada fila y columna corresponden a un medio de prensa,
+# y la entrada (i,j) contiene la cantidad de veces que el medio "i" menciona al medio "j".
+
+# mentions_matrix = ...
+
+```
+
+```{python}
+# Opcional: Genere un grafo dirigido con la matriz de adyacencia para visualizar las menciones.
+# Puede ser útil la biblioteca networkx.
+```
+
+## D. Preguntas propuestas
+Proponga al menos tres preguntas que se podrían intentar responder a partir de estos datos, y mencione posibles caminos para responderlas, sin implementar nada.
 
