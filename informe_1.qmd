@@ -1,0 +1,741 @@
+---
+title: "Entrega 1 - Introducción a la Ciencia de Datos"
+author: "Grupo 8: Facundo Morini, Cecilia Waksman"
+date: today
+lang: es
+format:
+  pdf:
+    titlepage: true
+    include-in-header:
+      text: |
+        \usepackage{booktabs}
+        \usepackage{float}
+execute:
+    echo: false
+    warning: false
+    message: false
+---
+
+```{r}
+library(reticulate)
+use_python(
+  "C:/Users/facur/anaconda3/envs/fertcast/python.exe",
+  required = TRUE
+)
+```
+
+```{python}
+from time import time
+from pathlib import Path
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import networkx as nx
+from datasets import load_dataset
+import re
+import string
+from sklearn.feature_extraction.text import CountVectorizer, ENGLISH_STOP_WORDS
+```
+
+# Introducción
+
+En este trabajo se realizará un primer análisis exploratorio de un conjunto de artículos de noticias publicados en distintos medios de prensa. El objetivo general será estudiar la estructura de los datos disponibles, evaluar su calidad y construir visualizaciones que permitan identificar patrones relevantes en la información. El análisis tendrá un carácter descriptivo, centrado en la exploración de los datos.
+
+En particular, se trabajará con un subconjunto de la base de datos *All the News 2.1 -- Component One*, que reúne artículos provenientes de diversos medios periodísticos. A partir de estos datos, el análisis se centrará inicialmente en la carga y limpieza de la información, como la presencia de valores faltantes, problemas de calidad de datos y diferencias en la cantidad de artículos disponibles para cada medio. Luego de esta primera exploración, se seleccionarán los cinco medios con mayor cantidad de artículos, sobre los cuales se desarrollará el resto del trabajo.
+
+# Datos Utilizados
+
+```{python}
+#| include: false
+cache_dir = Path("C:/hf_cache")
+cache_dir.mkdir(parents=True, exist_ok=True)
+ds = load_dataset("tomas-gr/all-the-news-2-1-Component-one-sampled", split="train",cache_dir=str(cache_dir),
+    download_mode="force_redownload")
+df = ds.to_pandas()
+
+df["date"] = pd.to_datetime(df["date"], format="mixed")
+df["year"] = pd.to_numeric(df["year"], errors="coerce")
+df["month"] = pd.to_numeric(df["month"], errors="coerce")
+df["day"] = pd.to_numeric(df["day"], errors="coerce")
+
+text_columns = [
+    "author",
+    "title",
+    "article",
+    "url",
+    "section",
+    "publication"
+]
+
+df[text_columns] = df[text_columns].astype("string")
+```
+
+Como se mencionó anteriormente, los datos utilizados provienen de un subconjunto del dataset All the News 2.1 – Component One ([Link](https://huggingface.co/datasets/rjac/all-the-news-2-1-Component-one?utm_source=chatgpt.com)). Esta base contiene artículos periodísticos publicados en distintos medios de prensa y permite trabajar con información textual junto con metadatos asociados a cada artículo.
+
+En el Cuadro \ref{tab:resumen_variables} se presenta un resumen general de las variables disponibles en la base de datos. En primer lugar, se observa que el conjunto contiene un total de **30.213 observaciones**, donde cada fila corresponde a un artículo periodístico. Las variables \texttt{idx} y \texttt{article\_idx} funcionan como identificadores, presentando un valor único para cada observación, por lo que no serán de interés directo para el análisis exploratorio más allá de permitir identificar artículos particulares.
+
+Por otro lado, se identifican cuatro variables asociadas al contexto temporal de los artículos: \texttt{date}, \texttt{year}, \texttt{month} y \texttt{day}. La variable \texttt{date} contiene la fecha completa de publicación, mientras que las restantes desagregan dicha información en año, mes y día. A partir del resumen se observa que los artículos abarcan cinco años distintos, correspondientes al período 2016--2020.
+
+Además de las variables temporales, la base contiene información asociada al contenido y al origen de cada artículo. En particular, la variable \texttt{publication} identifica el medio de prensa en el que fue publicado el artículo, observándose un total de 26 medios distintos en la base. Por otro lado, las variables \texttt{title} y \texttt{article} contienen la información textual principal: el título de la noticia y el cuerpo del artículo, respectivamente. Estas variables resultan fundamentales para el procesamiento de texto y el posterior conteo de palabras.
+
+También se cuenta con las variables \texttt{author}, \texttt{url} y \texttt{section}. La primera identifica el autor o autores asociados al artículo, mientras que \texttt{url} contiene el enlace original de la publicación. La variable \texttt{section}, por su parte, indica la sección temática a la que pertenece el artículo dentro del medio correspondiente, alcanzando un total de 707 valores distintos.
+
+```{python}
+#| results: asis
+tabla_resumen = pd.DataFrame({
+    "Variable": df.columns,
+    "Tipo": df.dtypes.astype(str).values,
+    "Valores únicos": df.nunique(dropna=True).values,
+    "No faltantes": df.notna().sum().values,
+    "% faltantes": (df.isna().mean() * 100).round(2).values
+})
+
+latex_tabla = tabla_resumen.to_latex(
+    index=False,
+    escape=True,
+    caption="Resumen de las variables disponibles en la base de datos.",
+    label="tab:resumen_variables",
+    column_format="llccc",
+    float_format="%.2f"
+)
+
+latex_tabla = latex_tabla.replace(
+    "\\begin{table}",
+    "\\begin{table}\n\\centering"
+)
+
+print(latex_tabla)
+```
+
+En relación con la calidad de los datos, se observa que la mayoría de las variables centrales para el análisis presentan pocos o ningún valor faltante. Las variables temporales y el título de los artículos se encuentran completas, mientras que \texttt{publication} y \texttt{url} presentan únicamente un 0.47\% de valores faltantes. En el caso del cuerpo del artículo, la variable \texttt{article} presenta un 3.89\% de faltantes, proporción relativamente baja. En contraste, las variables \texttt{author} y \texttt{section} presentan porcentajes considerablemente mayores de valores faltantes, con 37.75\% y 33.87\%, respectivamente.
+
+\newpage
+
+Como primer acercamiento a la distribución de los artículos por medio de prensa, se realizó el conteo de publicaciones asociadas a cada medio. En la Figura \ref{fig-top-medios} se presentan los diez medios con mayor cantidad de artículos dentro de la base. Se observa una distribución claramente desigual, donde un grupo reducido de medios concentra una parte importante de las publicaciones disponibles, sobre todo \texttt{Reuters} que tiene una amplia diferencia con respecto al resto de medios. Esta desigualdad en la cantidad de observaciones es un aspecto importante a considerar si el objetivo final es la clasificación de medios o trabajar con secciones ya que se tendrá una muestra desbalanceada al contenido que ofrece dicho medio.
+
+```{python}
+#| label: fig-top-medios
+#| fig-cap: "Diez medios con mayor cantidad de artículos en la base de datos."
+#| fig-align: center
+
+conteo_medios = (
+    df["publication"]
+    .dropna()
+    .value_counts()
+)
+top_10_medios = conteo_medios.head(10)
+
+fig, ax = plt.subplots(figsize=(9, 5))
+top_10_medios.sort_values().plot(
+    kind="barh",
+    ax=ax
+);
+ax.set_xlabel("Cantidad de artículos");
+ax.set_ylabel("Medio de prensa");
+ax.set_title("Top 10 medios con mayor cantidad de artículos");
+ax.set_xlim(0,10500);
+
+for i, value in enumerate(top_10_medios.sort_values()):
+    ax.text(
+        value,
+        i,
+        f" {value}",
+        va="center",
+        fontsize=9
+    );
+ax.grid(axis="x", alpha=0.3);
+plt.tight_layout();
+plt.show();
+```
+A partir de este resultado, el resto del análisis desarrollado en este trabajo se realizará únicamente sobre los cinco medios con mayor cantidad de artículos: \texttt{Reuters}, \texttt{The New York Times}, \texttt{People}, \texttt{CNBC} y \texttt{The Hill}. En conjunto, estos reúnen 18.771 artículos, lo que representa aproximadamente el 62.42\% del total de artículos con medio registrado. 
+
+```{python}
+top_5_publications = df["publication"].value_counts().head(5).reset_index()
+top_5_publications.columns = [
+    "Medio de prensa",
+    "Cantidad de artículos"]
+
+df_top_5 = df[df["publication"].isin(top_5_publications["Medio de prensa"])]
+```
+
+En la Figura \ref{fig-articulos-mensuales} se muestra la cantidad de artículos publicados entre 2016 y 2020 para los cinco medios con mayor cantidad de artículos en la base. Se optó por visualizar la evolución en escala mensual, ya que esta permite observar mejor la distribución temporal de las publicaciones y reduce el ruido que se obtendría al trabajar con conteos diarios.
+
+En primer lugar, se destaca claramente \texttt{Reuters}, que es el medio con mayor cantidad de artículos publicados durante prácticamente todo el período. En general, presenta entre 100 y 250 artículos mensuales en la mayor parte de los meses observados, ubicándose de forma sistemática por encima del resto de los medios.
+
+El resto de los medios presenta volúmenes de publicación considerablemente menores y más similares entre sí. En general, \texttt{The New York Times}, \texttt{People}, \texttt{CNBC} y \texttt{The Hill} se ubican en valores cercanos a los 50 artículos mensuales, con pocos meses por encima de los 100 artículos. Aun así, se observan algunas diferencias puntuales, como el aumento en la cantidad de publicaciones de \texttt{CNBC} a partir de 2019.
+
+Un aspecto importante a considerar es que los medios no necesariamente presentan el mismo rango temporal de cobertura dentro de la base. En particular, algunos medios dejan de registrar artículos en los últimos meses del período. Por este motivo, cualquier análisis que incorpore explícitamente el componente temporal debe realizarse con precaución, ya que las diferencias observadas pueden estar influidas tanto por cambios reales en la publicación de artículos como por la cobertura desigual del dataset a lo largo del tiempo.
+
+```{python}
+#| label: fig-articulos-mensuales
+#| fig-cap: "Cantidad mensual de artículos publicados por los cinco medios principales."
+#| fig-align: center
+
+import matplotlib.dates as mdates
+
+df_top_5 = df_top_5.copy()
+df_top_5["año_mes"] = df_top_5["date"].dt.to_period("M").dt.to_timestamp()
+
+# Conteo mensual original
+articulos_por_fecha_base = (
+    df_top_5
+    .groupby(["año_mes", "publication"])
+    .size()
+    .reset_index(name="Cantidad")
+)
+
+medios = (
+    df_top_5["publication"]
+    .dropna()
+    .value_counts()
+    .index
+)
+
+series_completas = []
+
+for publication in medios:
+    subset = articulos_por_fecha_base[
+        articulos_por_fecha_base["publication"] == publication
+    ].copy()
+    
+    meses_medio = pd.date_range(
+        subset["año_mes"].min(),
+        subset["año_mes"].max(),
+        freq="MS"
+    )
+    
+    subset = (
+        subset
+        .set_index("año_mes")
+        .reindex(meses_medio, fill_value=0)
+        .rename_axis("año_mes")
+        .reset_index()
+    )
+    
+    subset["publication"] = publication
+    series_completas.append(subset)
+
+articulos_por_fecha = pd.concat(series_completas, ignore_index=True)
+media_mensual = (
+    articulos_por_fecha
+    .groupby("publication")["Cantidad"]
+    .mean()
+)
+
+fig, ax = plt.subplots(figsize=(14, 9))
+for publication in medios:
+    subset = articulos_por_fecha[
+        articulos_por_fecha["publication"] == publication
+    ]
+    
+    linea, = ax.plot(
+        subset["año_mes"],
+        subset["Cantidad"],
+        linewidth=2.2,
+        label=f"{publication} (media = {media_mensual[publication]:.1f})",
+        alpha=0.75
+    )
+    
+    color = linea.get_color()
+    ax.scatter(
+        subset["año_mes"],
+        subset["Cantidad"],
+        s=28,
+        alpha=0.75,
+        color=color
+    );
+    ax.hlines(
+        y=media_mensual[publication],
+        xmin=subset["año_mes"].min(),
+        xmax=subset["año_mes"].max(),
+        linestyle="--",
+        linewidth=1.2,
+        alpha=0.45,
+        color=color
+    );
+ax.set_xlabel("Fecha", fontsize=12);
+ax.set_ylabel("Cantidad de artículos", fontsize=12);
+ax.set_title(
+    "Artículos publicados mensualmente por cada medio",
+    fontsize=15,
+    pad=12
+);
+ax.tick_params(axis="both", labelsize=12);
+ax.grid(True, which="major", axis="both", alpha=0.3);
+ax.grid(True, which="minor", axis="x", alpha=0.15);
+ax.xaxis.set_major_locator(mdates.YearLocator());
+ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"));
+ax.xaxis.set_minor_locator(mdates.MonthLocator(interval=3));
+plt.xticks(rotation=0);
+ax.legend(
+    title="Medio",
+    title_fontsize=12,
+    fontsize=12,
+    bbox_to_anchor=(1.02, 1),
+    loc="upper left"
+);
+plt.tight_layout();
+plt.show();
+```
+
+# Limpieza y Normalización del Texto
+
+Para trabajar con los datos provenientes de variables como \texttt{article} o \texttt{title}, es necesario realizar un un proceso de limpieza y normalización del texto, ya que pequeñas diferencias de escritura pueden generar conteos artificialmente distintos. Por ejemplo, palabras como \textit{President}, \textit{president.} y \textit{president,} serían interpretadas como términos diferentes si no se eliminan mayúsculas y signos de puntuación.
+
+En este caso se trabajo principalmente el cuerpo de los artículos, contenido en la variable \texttt{article}, como base para el análisis textual. Sobre esta variable se aplicaron distintas transformaciones orientadas a obtener una representación más homogénea del texto. En primer lugar, se eliminaron encabezados o fragmentos iniciales que aparecían antes del primer salto de línea. Luego, el texto fue transformado a minúsculas, con el objetivo de evitar que diferencias en el uso de mayúsculas generaran palabras artificialmente distintas.
+
+También se eliminaron signos de puntuación, saltos de línea y símbolos especiales, sustituyéndolos por espacios para evitar que palabras originalmente separadas quedaran unidas. Adicionalmente, se removieron números, fragmentos con caracteres no alfabéticos y otros elementos que podían introducir ruido en el análisis, como restos de enlaces, códigos o expresiones con símbolos poco informativos. Finalmente, se normalizaron los espacios en blanco, reduciendo múltiples espacios consecutivos a uno solo.
+
+Como resultado de este procedimiento se obtuvo una nueva versión limpia del texto, sobre la cual se realizaron los conteos de palabras. Esta transformación permite que el análisis posterior se concentre en los términos efectivamente utilizados en los artículos, reduciendo diferencias atribuibles al formato del texto y no al contenido.
+
+```{python}
+def clean_text(df, column_name):
+
+    # Eliminar encabezado hasta el primer salto de línea
+    result = df[column_name].str.replace(
+        r"^[^\n]*\n",
+        "",
+        regex=True
+    )
+
+    # Minúsculas
+    result = result.str.lower()
+
+    # Reemplazar puntuación y saltos de línea por espacios
+    punctuation = re.escape(string.punctuation + "—–¿¡«»")
+    result = result.str.replace(
+        f"[{punctuation}\\n]",
+        " ",
+        regex=True
+    )
+
+    # Eliminar palabras que contengan caracteres no permitidos
+    result = result.str.replace(
+        r"\b\S*[^a-zA-Z\sáéíóúüñ]\S*\b",
+        "",
+        regex=True
+    )
+
+    # Eliminar espacios múltiples
+    result = result.str.replace(
+        r"\s+",
+        " ",
+        regex=True
+    ).str.strip()
+
+    return result
+```
+
+```{python}
+#| results: asis
+
+df_top_5["CleanText"] = clean_text(df_top_5, "article")
+tabla_ejemplo = df_top_5[["article", "CleanText"]].head(5).copy()
+tabla_ejemplo["article"] = (
+    tabla_ejemplo["article"]
+    .fillna("")
+    .astype(str)
+    .str.slice(0, 30)
+    + "..."
+)
+tabla_ejemplo["CleanText"] = (
+    tabla_ejemplo["CleanText"]
+    .fillna("")
+    .astype(str)
+    .str.slice(0, 30)
+    + "..."
+)
+latex_tabla = tabla_ejemplo.to_latex(
+    index=False,
+    escape=True,
+    column_format="p{0.42\\textwidth}p{0.42\\textwidth}",
+    caption="Ejemplo de texto original y texto procesado.",
+    label="tab:ejemplo_limpieza"
+)
+latex_tabla = latex_tabla.replace(
+    "\\begin{table}",
+    "\\begin{table}[H]\n\\centering\n\\scriptsize"
+)
+
+print(latex_tabla)
+```
+Respecto a los campos de texto a utilizar, se consideró la posibilidad de trabajar únicamente con el cuerpo del artículo, únicamente con el título o con una combinación de ambos. El cuerpo del artículo tiene la ventaja de contener una mayor cantidad de información y permitir una caracterización más completa del vocabulario utilizado por cada medio. El título, por otro lado, también contiene información relevante, ya que suele condensar el tema principal de la noticia. Sin embargo, al tratarse de un texto mucho más breve y que potencialmente sea redundante a lo que ya dice el articulo, en este trabajo se utiliza principalmente el cuerpo de los artículos para el análisis posterior.
+
+Un aspecto importante al trabajar con artículos provenientes de distintos medios es analizar si dentro del propio texto aparecen elementos que identifiquen de forma directa la publicación de origen. Estas pistas pueden aparecer de distintas formas: nombres del medio, URLs, firmas editoriales, referencias a agencias de noticias, nombres de secciones o frases repetidas propias de una plantilla de publicación.
+
+En este caso, al observar los textos originales se identifican algunos elementos de este tipo. Por ejemplo, en varios artículos aparecen menciones explícitas al medio o la pagina web del medio como se visualiza en la Figura \ref{fig-pistas-medios}.
+
+```{python}
+#| label: fig-pistas-medios
+#| fig-cap: "Porcentaje de artículos con pistas directas del medio de prensa."
+#| fig-align: center
+
+import numpy as np
+
+df_pistas = df_top_5.copy()
+texto = (df_pistas["article"].fillna("").astype(str)).str.lower()
+url = df_pistas["url"].fillna("").astype(str).str.lower()
+patrones_nombre = {"Reuters": r"\breuters\b","CNBC": r"\bcnbc\b",
+    "The New York Times": r"\bnew york times\b|\bnytimes\b","The Hill": r"\bthe hill\b|\bthehill\b",
+    "People": r"\bpeople\b|\bpeople\.com\b"}
+patrones_url = {"Reuters": r"reuters\.com","CNBC": r"cnbc\.com",
+    "The New York Times": r"nytimes\.com","The Hill": r"thehill\.com","People": r"people\.com"}
+
+resultados_pistas = []
+for medio in df_pistas["publication"].dropna().unique():
+    mask = df_pistas["publication"] == medio
+    n = mask.sum()
+    
+    patron_nombre = patrones_nombre.get(medio, None)
+    patron_url = patrones_url.get(medio, None)
+    
+    if patron_nombre is not None:
+        prop_nombre = texto[mask].str.contains(patron_nombre,
+            regex=True,
+            na=False).mean() * 100
+    else:
+        prop_nombre = np.nan
+    
+    if patron_url is not None:
+        prop_url = texto[mask].str.contains(patron_url,
+            regex=True,
+            na=False).mean() * 100
+    else:
+        prop_url = np.nan
+    
+    resultados_pistas.append({
+        "publication": medio,
+        "Nombre del medio en artículo": prop_nombre,
+        "URL del medio en artículo": prop_url
+    })
+
+df_resultados_pistas = pd.DataFrame(resultados_pistas)
+orden_medios = (df_top_5["publication"].value_counts().index.tolist())
+df_resultados_pistas = (
+    df_resultados_pistas.set_index("publication").reindex(orden_medios))
+
+fig, ax = plt.subplots(figsize=(11, 6))
+tipos_pistas = df_resultados_pistas.columns.tolist()
+y = np.arange(len(df_resultados_pistas.index))
+height = 0.22
+for i, tipo in enumerate(tipos_pistas):
+    ax.barh(y + (i - 1) * height,
+        df_resultados_pistas[tipo],
+        height=height,
+        label=tipo);
+ax.set_yticks(y);
+ax.set_yticklabels(df_resultados_pistas.index, fontsize=12);
+ax.set_xlabel("Porcentaje de artículos", fontsize=12);
+ax.set_ylabel("Medio de prensa", fontsize=12);
+ax.set_title(
+    "Presencia de pistas directas del medio en los artículos",
+    fontsize=14,
+    pad=12
+);
+ax.tick_params(axis="x", labelsize=12);
+ax.grid(axis="x", alpha=0.3);
+ax.legend(
+    fontsize=12,
+    loc="upper right"
+);
+plt.tight_layout();
+plt.show();
+```
+Si el objetivo fuera construir un modelo para predecir el medio de prensa a partir del contenido del artículo, estas pistas deberían ser eliminadas o al menos reducidas. De lo contrario, se le estaría pasando directamente al modelo etiquetas dentro de las características, algo generalmente no deseable. Por este motivo, para una eventual tarea de clasificación sería conveniente eliminar nombres de medios, dominios de URLs, firmas repetidas y frases de plantilla que permitan identificar directamente la publicación.
+
+Otra decisión relevante consiste en evaluar si conviene restringir el análisis a artículos de una misma sección temática o a un período temporal acotado. Esto también va a depender realmente del uso que se fuese a dar a los datos finalmente. Si la tarea final involucra describir o predecir/clasificar una sección o un periodo particular tiene sentido realizar dicha restricción. De igual forma como se vio en el análisis mensual de los medios podría ser mas optimo el de acotar el periodo temporal podría hacer más justa la comparación. Sin embargo, cualquier restricción que se haga con los datos también presenta desventajas. Por ejemplo, la variable \texttt{section} tiene una proporción importante de valores faltantes, por lo que utilizarla implicaría descartar una parte considerable de los artículos. 
+
+# Conteo de palabras
+
+Como primer acercamiento al contenido textual de los artículos, se construyó una nube de palabras utilizando el cuerpo de las noticias ya procesado. En la Figura \ref{fig-nube-stopwords} se observa que las palabras con mayor presencia son principalmente términos muy frecuentes del idioma inglés, como artículos, preposiciones y conectores. Estas palabras, conocidas como palabras vacías o \textit{stopwords}, aparecen repetidamente en la mayoría de los textos, pero no aportan demasiada información sobre el contenido específico de los artículos.
+
+Este resultado muestra la importancia de aplicar un filtrado adicional antes de realizar comparaciones entre medios. Si se conservaran estas palabras en los conteos, las frecuencias estarían dominadas por términos de uso general y sería más difícil identificar diferencias relevantes en el vocabulario utilizado por cada publicación. 
+
+```{python}
+#| label: fig-nube-stopwords
+#| fig-cap: "Nube de palabras de los artículos."
+#| fig-align: center
+
+from wordcloud import WordCloud
+
+texto_total = " ".join(
+    df_top_5["CleanText"]
+    .dropna()
+    .astype(str)
+)
+
+# Nube de palabras SIN eliminar stopwords
+wordcloud = WordCloud(
+    width=1200,
+    height=600,
+    background_color="white",
+    max_words=100,
+    stopwords=set(),        # importante: no eliminar palabras vacías
+    collocations=False,
+    random_state=123
+).generate(texto_total)
+
+fig, ax = plt.subplots(figsize=(11, 5.5))
+ax.imshow(wordcloud, interpolation="bilinear");
+ax.axis("off");
+plt.tight_layout();
+plt.show();
+```
+
+```{python}
+stopwords = list(ENGLISH_STOP_WORDS) + ["s", "u", "say", "said"]
+
+df_top_5["CleanText_no_stop_words"] = (
+    df_top_5["CleanText"]
+    .str.replace(
+        r"\b(" + "|".join(stopwords) + r")\b",
+        "",
+        regex=True
+    )
+    .str.replace(r"\s+", " ", regex=True)
+    .str.strip()
+)
+```
+
+```{python}
+import math
+
+def plot_wordclouds_by_publication(
+    df,
+    text_col="CleanText_no_stop_words",
+    pub_col="publication",
+    max_words=100,
+    stopwords=None,
+    cols=2,
+    figsize=(16, 6)
+):
+    publications = df[pub_col].dropna().unique()
+    n_publications = len(publications)
+    rows = math.ceil(n_publications / cols)
+
+    fig, axes = plt.subplots(rows, cols, figsize=(figsize[0], figsize[1] * rows))
+    
+    # Asegurar que axes siempre sea iterable
+    if rows == 1 and cols == 1:
+        axes = [axes]
+    else:
+        axes = axes.flatten()
+
+    for i, publication in enumerate(publications):
+        text = " ".join(
+            df.loc[df[pub_col] == publication, text_col]
+            .dropna()
+            .astype(str)
+        )
+
+        wordcloud = WordCloud(
+            width=800,
+            height=400,
+            background_color="white",
+            stopwords=stopwords,
+            max_words=max_words
+        ).generate(text)
+
+        axes[i].imshow(wordcloud, interpolation="bilinear")
+        axes[i].set_title(f"Word Cloud - {publication}")
+        axes[i].axis("off")
+
+    # Ocultar ejes vacíos
+    for j in range(i + 1, len(axes)):
+        axes[j].axis("off")
+
+    plt.tight_layout()
+    plt.show()
+```
+
+# NUBE PALABRAS (OPCIÓN 1)
+
+```{python}
+plot_wordclouds_by_publication(
+    df_top_5,
+    max_words=50
+)
+```
+
+# ANALISIS CORRESPONDENCIA (OPCIÓN 2)
+
+
+```{python}
+rows = []
+top_n = 100
+text_col = "CleanText_no_stop_words"
+
+for publication, group in df_top_5.groupby("publication"):
+    texts = group[text_col].dropna().astype(str)
+
+    vectorizer = CountVectorizer()
+    word_matrix = vectorizer.fit_transform(texts)
+
+    word_counts = word_matrix.sum(axis=0).A1
+    words = vectorizer.get_feature_names_out()
+
+    freq_df = pd.DataFrame({
+        "publication": publication,
+        "word": words,
+        "count": word_counts
+    })
+
+    freq_df = freq_df.sort_values("count", ascending=False).head(top_n)
+    rows.append(freq_df)
+
+top_words_df = pd.concat(rows, ignore_index=True)
+
+other_stopwords = {
+    "new", "times", "ms",
+    "cnbc", "reuters", "nyt", "newyorktimes", "york"
+}
+
+stopwords = set(stopwords).union(other_stopwords)
+
+df_ac = top_words_df[
+    ~top_words_df["word"].isin(stopwords)
+].copy()
+
+top_100_words = (
+    df_ac.groupby("word")["count"]
+    .sum()
+    .sort_values(ascending=False)
+    .head(100)
+    .index
+)
+
+df_ac = df_ac[df_ac["word"].isin(top_100_words)]
+
+tabla_ac = (
+    df_ac.pivot_table(
+        index="publication",
+        columns="word",
+        values="count",
+        aggfunc="sum",
+        fill_value=0
+    )
+)
+```
+
+```{python}
+import prince 
+from adjustText import adjust_text
+
+ca = prince.CA(
+    n_components=2,
+    n_iter=100,
+    random_state=123
+);
+
+ca = ca.fit(tabla_ac);
+
+row_coords = ca.row_coordinates(tabla_ac);
+col_coords = ca.column_coordinates(tabla_ac);
+
+palabras = ["democrats", "senate", "capitol", "dc","washington", "campaign", "house", "trump",
+            "market", "markets", "financial", "bank","billion", "shares", "investors", "oil",
+            "economy", "trade","family", "life", "like", "work","american", "political", "white", "mr"]
+palabras_mostrar = [
+    p for p in palabras
+    if p in col_coords.index
+]
+palabras_no_mostrar = [
+    p for p in col_coords.index
+    if p not in palabras
+]
+fig, ax = plt.subplots(figsize=(10, 8))
+ax.scatter(
+    col_coords.loc[palabras_no_mostrar, 0],
+    col_coords.loc[palabras_no_mostrar, 1],
+    color="tab:blue",
+    alpha=0.30,
+    s=25
+);
+ax.scatter(
+    col_coords.loc[palabras_mostrar, 0],
+    col_coords.loc[palabras_mostrar, 1],
+    color="tab:orange",
+    alpha=0.9,
+    s=55
+);
+
+texts = []
+
+for palabra in palabras_mostrar:
+    texts.append(
+        ax.text(
+            col_coords.loc[palabra, 0],
+            col_coords.loc[palabra, 1],
+            palabra,
+            fontsize=11,
+            color="tab:orange"
+        )
+    );
+ax.scatter(
+    row_coords[0],
+    row_coords[1],
+    color="black",
+    s=90,
+    label="Medios"
+);
+offset_medios = {
+    "The New York Times": (0.05, 0.06),
+    "People": (-0.06, -0.08),
+    "CNBC": (0.02, 0.03),
+    "Reuters": (0.02, -0.06),
+    "The Hill": (0.02, 0.03)
+}
+for medio in row_coords.index:
+    dx, dy = offset_medios.get(medio, (0.02, 0.02))
+    
+    ax.text(
+        row_coords.loc[medio, 0] + dx,
+        row_coords.loc[medio, 1] + dy,
+        medio,
+        fontsize=12,
+        fontweight="bold",
+        color="black",
+        ha="right" if dx < 0 else "left",
+        va="center"
+    );
+adjust_text(
+    texts,
+    ax=ax,
+    force_text=(0.05, 0.08),
+    force_static=(0.05, 0.08),
+    force_pull=(0.01, 0.02),
+    max_move=(8, 8),
+    expand=(1.05, 1.10),
+    ensure_inside_axes=True,
+    arrowprops=dict(
+        arrowstyle="-",
+        lw=0.4,
+        alpha=0.4,
+        color="gray"
+    )
+);
+ax.axhline(0, linestyle="--", linewidth=0.8);
+ax.axvline(0, linestyle="--", linewidth=0.8);
+ax.set_xlabel("Dimensión 1");
+ax.set_ylabel("Dimensión 2");
+ax.set_title("Análisis de Correspondencias: Medios y las 100 palabras mas frecuentes");
+ax.legend();
+ax.grid(alpha=0.3);
+plt.show();
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
