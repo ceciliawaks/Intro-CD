@@ -17,13 +17,14 @@ execute:
 ---
 
 ```{r}
-library(reticulate)
+# library(reticulate)
+
 # use_python(
 #   "C:/Users/facur/anaconda3/envs/fertcast/python.exe",
 #   required = TRUE
 # )
 
-Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
+# Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
 ```
 
 ```{python}
@@ -42,7 +43,6 @@ from sklearn.feature_extraction.text import CountVectorizer, ENGLISH_STOP_WORDS
 from wordcloud import WordCloud
 import prince 
 from adjustText import adjust_text
-import networkx as nx
 ```
 
 # Introducción

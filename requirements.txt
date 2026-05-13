@@ -1,10 +1,10 @@
-jupyter
+numpy
 pandas
+matplotlib
 seaborn
-pillow
 networkx
-nltk
-scikit-learn
 datasets
-ydata-profiling
-setuptools
+scikit-learn
+wordcloud
+prince
+adjustText
