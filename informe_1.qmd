@@ -18,15 +18,18 @@ execute:
 
 ```{r}
 library(reticulate)
-use_python(
-  "C:/Users/facur/anaconda3/envs/fertcast/python.exe",
-  required = TRUE
-)
+# use_python(
+#   "C:/Users/facur/anaconda3/envs/fertcast/python.exe",
+#   required = TRUE
+# )
+
+Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
 ```
 
 ```{python}
 from time import time
 from pathlib import Path
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -34,7 +37,12 @@ import networkx as nx
 from datasets import load_dataset
 import re
 import string
+import math
 from sklearn.feature_extraction.text import CountVectorizer, ENGLISH_STOP_WORDS
+from wordcloud import WordCloud
+import prince 
+from adjustText import adjust_text
+import networkx as nx
 ```
 
 # Introducción
@@ -82,6 +90,7 @@ También se cuenta con las variables \texttt{author}, \texttt{url} y \texttt{sec
 
 ```{python}
 #| results: asis
+
 tabla_resumen = pd.DataFrame({
     "Variable": df.columns,
     "Tipo": df.dtypes.astype(str).values,
@@ -96,12 +105,13 @@ latex_tabla = tabla_resumen.to_latex(
     caption="Resumen de las variables disponibles en la base de datos.",
     label="tab:resumen_variables",
     column_format="llccc",
-    float_format="%.2f"
+    float_format="%.2f",
+    position="H"
 )
 
 latex_tabla = latex_tabla.replace(
-    "\\begin{table}",
-    "\\begin{table}\n\\centering"
+    "\\begin{table}[H]",
+    "\\begin{table}[H]\n\\centering"
 )
 
 print(latex_tabla)
@@ -117,6 +127,7 @@ Como primer acercamiento a la distribución de los artículos por medio de prens
 #| label: fig-top-medios
 #| fig-cap: "Diez medios con mayor cantidad de artículos en la base de datos."
 #| fig-align: center
+#| fig-pos: "H"
 
 conteo_medios = (
     df["publication"]
@@ -145,7 +156,7 @@ for i, value in enumerate(top_10_medios.sort_values()):
     );
 ax.grid(axis="x", alpha=0.3);
 plt.tight_layout();
-plt.show();
+plt.show()
 ```
 A partir de este resultado, el resto del análisis desarrollado en este trabajo se realizará únicamente sobre los cinco medios con mayor cantidad de artículos: \texttt{Reuters}, \texttt{The New York Times}, \texttt{People}, \texttt{CNBC} y \texttt{The Hill}. En conjunto, estos reúnen 18.771 artículos, lo que representa aproximadamente el 62.42\% del total de artículos con medio registrado. 
 
@@ -160,20 +171,14 @@ df_top_5 = df[df["publication"].isin(top_5_publications["Medio de prensa"])]
 
 En la Figura \ref{fig-articulos-mensuales} se muestra la cantidad de artículos publicados entre 2016 y 2020 para los cinco medios con mayor cantidad de artículos en la base. Se optó por visualizar la evolución en escala mensual, ya que esta permite observar mejor la distribución temporal de las publicaciones y reduce el ruido que se obtendría al trabajar con conteos diarios.
 
-En primer lugar, se destaca claramente \texttt{Reuters}, que es el medio con mayor cantidad de artículos publicados durante prácticamente todo el período. En general, presenta entre 100 y 250 artículos mensuales en la mayor parte de los meses observados, ubicándose de forma sistemática por encima del resto de los medios.
-
-El resto de los medios presenta volúmenes de publicación considerablemente menores y más similares entre sí. En general, \texttt{The New York Times}, \texttt{People}, \texttt{CNBC} y \texttt{The Hill} se ubican en valores cercanos a los 50 artículos mensuales, con pocos meses por encima de los 100 artículos. Aun así, se observan algunas diferencias puntuales, como el aumento en la cantidad de publicaciones de \texttt{CNBC} a partir de 2019.
-
-Un aspecto importante a considerar es que los medios no necesariamente presentan el mismo rango temporal de cobertura dentro de la base. En particular, algunos medios dejan de registrar artículos en los últimos meses del período. Por este motivo, cualquier análisis que incorpore explícitamente el componente temporal debe realizarse con precaución, ya que las diferencias observadas pueden estar influidas tanto por cambios reales en la publicación de artículos como por la cobertura desigual del dataset a lo largo del tiempo.
-
 ```{python}
 #| label: fig-articulos-mensuales
 #| fig-cap: "Cantidad mensual de artículos publicados por los cinco medios principales."
 #| fig-align: center
+#| fig-pos: "H"
 
 import matplotlib.dates as mdates
 
-df_top_5 = df_top_5.copy()
 df_top_5["año_mes"] = df_top_5["date"].dt.to_period("M").dt.to_timestamp()
 
 # Conteo mensual original
@@ -275,12 +280,19 @@ ax.legend(
     loc="upper left"
 );
 plt.tight_layout();
-plt.show();
+plt.show()
 ```
+
+
+En primer lugar, se destaca claramente \texttt{Reuters}, que es el medio con mayor cantidad de artículos publicados durante prácticamente todo el período. En general, presenta entre 100 y 250 artículos mensuales en la mayor parte de los meses observados, ubicándose de forma sistemática por encima del resto de los medios.
+
+El resto de los medios presenta volúmenes de publicación considerablemente menores y más similares entre sí. En general, \texttt{The New York Times}, \texttt{People}, \texttt{CNBC} y \texttt{The Hill} se ubican en valores cercanos a los 50 artículos mensuales, con pocos meses por encima de los 100 artículos. Aun así, se observan algunas diferencias puntuales, como el aumento en la cantidad de publicaciones de \texttt{CNBC} a partir de 2019.
+
+Un aspecto importante a considerar es que los medios no necesariamente presentan el mismo rango temporal de cobertura dentro de la base. En particular, algunos medios dejan de registrar artículos en los últimos meses del período. Por este motivo, cualquier análisis que incorpore explícitamente el componente temporal debe realizarse con precaución, ya que las diferencias observadas pueden estar influidas tanto por cambios reales en la publicación de artículos como por la cobertura desigual del dataset a lo largo del tiempo.
 
 # Limpieza y Normalización del Texto
 
-Para trabajar con los datos provenientes de variables como \texttt{article} o \texttt{title}, es necesario realizar un un proceso de limpieza y normalización del texto, ya que pequeñas diferencias de escritura pueden generar conteos artificialmente distintos. Por ejemplo, palabras como \textit{President}, \textit{president.} y \textit{president,} serían interpretadas como términos diferentes si no se eliminan mayúsculas y signos de puntuación.
+Para trabajar con los datos provenientes de variables como \texttt{article} o \texttt{title}, es necesario realizar un un proceso de limpieza y normalización del texto, ya que pequeñas diferencias de escritura pueden generar conteos artificialmente distintos. Por ejemplo, palabras como \textit{President}, \textit{president.} y \textit{president} serían interpretadas como términos diferentes si no se eliminan mayúsculas y signos de puntuación.
 
 En este caso se trabajo principalmente el cuerpo de los artículos, contenido en la variable \texttt{article}, como base para el análisis textual. Sobre esta variable se aplicaron distintas transformaciones orientadas a obtener una representación más homogénea del texto. En primer lugar, se eliminaron encabezados o fragmentos iniciales que aparecían antes del primer salto de línea. Luego, el texto fue transformado a minúsculas, con el objetivo de evitar que diferencias en el uso de mayúsculas generaran palabras artificialmente distintas.
 
@@ -359,6 +371,7 @@ latex_tabla = latex_tabla.replace(
 
 print(latex_tabla)
 ```
+
 Respecto a los campos de texto a utilizar, se consideró la posibilidad de trabajar únicamente con el cuerpo del artículo, únicamente con el título o con una combinación de ambos. El cuerpo del artículo tiene la ventaja de contener una mayor cantidad de información y permitir una caracterización más completa del vocabulario utilizado por cada medio. El título, por otro lado, también contiene información relevante, ya que suele condensar el tema principal de la noticia. Sin embargo, al tratarse de un texto mucho más breve y que potencialmente sea redundante a lo que ya dice el articulo, en este trabajo se utiliza principalmente el cuerpo de los artículos para el análisis posterior.
 
 Un aspecto importante al trabajar con artículos provenientes de distintos medios es analizar si dentro del propio texto aparecen elementos que identifiquen de forma directa la publicación de origen. Estas pistas pueden aparecer de distintas formas: nombres del medio, URLs, firmas editoriales, referencias a agencias de noticias, nombres de secciones o frases repetidas propias de una plantilla de publicación.
@@ -369,12 +382,11 @@ En este caso, al observar los textos originales se identifican algunos elementos
 #| label: fig-pistas-medios
 #| fig-cap: "Porcentaje de artículos con pistas directas del medio de prensa."
 #| fig-align: center
-
-import numpy as np
+#| fig-pos: "H"
 
 df_pistas = df_top_5.copy()
 texto = (df_pistas["article"].fillna("").astype(str)).str.lower()
-url = df_pistas["url"].fillna("").astype(str).str.lower()
+#url = df_pistas["url"].fillna("").astype(str).str.lower()
 patrones_nombre = {"Reuters": r"\breuters\b","CNBC": r"\bcnbc\b",
     "The New York Times": r"\bnew york times\b|\bnytimes\b","The Hill": r"\bthe hill\b|\bthehill\b",
     "People": r"\bpeople\b|\bpeople\.com\b"}
@@ -384,7 +396,7 @@ patrones_url = {"Reuters": r"reuters\.com","CNBC": r"cnbc\.com",
 resultados_pistas = []
 for medio in df_pistas["publication"].dropna().unique():
     mask = df_pistas["publication"] == medio
-    n = mask.sum()
+    #n = mask.sum()
     
     patron_nombre = patrones_nombre.get(medio, None)
     patron_url = patrones_url.get(medio, None)
@@ -425,6 +437,7 @@ for i, tipo in enumerate(tipos_pistas):
         label=tipo);
 ax.set_yticks(y);
 ax.set_yticklabels(df_resultados_pistas.index, fontsize=12);
+ax.invert_yaxis();
 ax.set_xlabel("Porcentaje de artículos", fontsize=12);
 ax.set_ylabel("Medio de prensa", fontsize=12);
 ax.set_title(
@@ -439,11 +452,12 @@ ax.legend(
     loc="upper right"
 );
 plt.tight_layout();
-plt.show();
+plt.show()
 ```
+
 Si el objetivo fuera construir un modelo para predecir el medio de prensa a partir del contenido del artículo, estas pistas deberían ser eliminadas o al menos reducidas. De lo contrario, se le estaría pasando directamente al modelo etiquetas dentro de las características, algo generalmente no deseable. Por este motivo, para una eventual tarea de clasificación sería conveniente eliminar nombres de medios, dominios de URLs, firmas repetidas y frases de plantilla que permitan identificar directamente la publicación.
 
-Otra decisión relevante consiste en evaluar si conviene restringir el análisis a artículos de una misma sección temática o a un período temporal acotado. Esto también va a depender realmente del uso que se fuese a dar a los datos finalmente. Si la tarea final involucra describir o predecir/clasificar una sección o un periodo particular tiene sentido realizar dicha restricción. De igual forma como se vio en el análisis mensual de los medios podría ser mas optimo el de acotar el periodo temporal podría hacer más justa la comparación. Sin embargo, cualquier restricción que se haga con los datos también presenta desventajas. Por ejemplo, la variable \texttt{section} tiene una proporción importante de valores faltantes, por lo que utilizarla implicaría descartar una parte considerable de los artículos. 
+Otra decisión relevante consiste en evaluar si conviene restringir el análisis a artículos de una misma sección temática o a un período temporal acotado. Esto también va a depender realmente del uso que se fuese a dar a los datos finalmente. Si la tarea final involucra describir o predecir/clasificar una sección o un período particular tiene sentido realizar dicha restricción. De igual forma, como se vio en el análisis mensual de los medios, podría ser más óptimo acotar el período temporal para así hacer más justa la comparación. Sin embargo, cualquier restricción que se haga con los datos también presenta desventajas. Por ejemplo, la variable \texttt{section} tiene una proporción importante de valores faltantes, por lo que utilizarla implicaría descartar una parte considerable de los artículos. 
 
 # Conteo de palabras
 
@@ -455,8 +469,7 @@ Este resultado muestra la importancia de aplicar un filtrado adicional antes de 
 #| label: fig-nube-stopwords
 #| fig-cap: "Nube de palabras de los artículos."
 #| fig-align: center
-
-from wordcloud import WordCloud
+#| fig-pos: "H"
 
 texto_total = " ".join(
     df_top_5["CleanText"]
@@ -498,8 +511,6 @@ df_top_5["CleanText_no_stop_words"] = (
 ```
 
 ```{python}
-import math
-
 def plot_wordclouds_by_publication(
     df,
     text_col="CleanText_no_stop_words",
@@ -507,7 +518,7 @@ def plot_wordclouds_by_publication(
     max_words=100,
     stopwords=None,
     cols=2,
-    figsize=(16, 6)
+    figsize=(16, 5)
 ):
     publications = df[pub_col].dropna().unique()
     n_publications = len(publications)
@@ -530,7 +541,7 @@ def plot_wordclouds_by_publication(
 
         wordcloud = WordCloud(
             width=800,
-            height=400,
+            height=370,
             background_color="white",
             stopwords=stopwords,
             max_words=max_words
@@ -548,17 +559,26 @@ def plot_wordclouds_by_publication(
     plt.show()
 ```
 
-# NUBE PALABRAS (OPCIÓN 1)
+\newpage
+
+Posterior al filtrado adicional se generaron nubes de palabras, esta vez una por cada medio de prensa. Si bien los medios presentan perfiles léxicos diferenciados, al compararlas se pueden observar que existen coincidencias, por ejemplo unidades de tiempo: \texttt{year}, \texttt{month}, \texttt{week}. También se repiten en varias de las nubes las palabras \texttt{time}, \texttt{new}, \texttt{government}, \texttt{trump} y \texttt{united states}, por lo que probablemente un tema recurrente y compartido por estos medios sea **la política en Estados Unidos**.
 
 ```{python}
+#| label: fig-nube-medio
+#| fig-cap: "Nube de palabras de los artículos por medio de prensa."
+#| fig-align: center
+#| fig-pos: "H"
+
 plot_wordclouds_by_publication(
     df_top_5,
     max_words=50
 )
 ```
 
-# ANALISIS CORRESPONDENCIA (OPCIÓN 2)
+_Reuters_ y _CNBC_ comparten un mayor número de palabras respecto a los demás medios: \texttt{company}, \texttt{china} y \texttt{market} son algunas de ellas, por lo que pareciera que estos medios tratan con mayor fecuencia noticias vinculadas al mercado internacional. Por su lado, en _The Hill_ predominan términos relacionados a la política estadounidense, incluso se nombra de distintas formas Washington D.C. La fuerte presencia de referencias geográficas e institucionales refuerza la idea de que este medio se encuentra especialmente orientado a la cobertura política y legislativa. _People_ cuenta con artículos que nombran la familia y sus integrantes, así como también distintos ámbitos de la vida cotidiana. Por último, _The New York Times_ muestra una nube más heterogénea, por lo que sugiere cobertura de temas más amplia y diversa, muchos de estos temas son también mencionados en los demás medios.
 
+
+Con el objetivo de complementar la lectura visual de las nubes de palabras, se incorporó un análisis de correspondencias (CA) entre los 5 medios de prensa y las 100 palabras más frecuentes para el conjunto de ellos. Esta técnica permite representar en un mismo plano a los medios y a los términos, de forma que la cercanía entre ellos sugiere una mayor asociación relativa.
 
 ```{python}
 rows = []
@@ -618,8 +638,11 @@ tabla_ac = (
 ```
 
 ```{python}
-import prince 
-from adjustText import adjust_text
+#| label: fig-ca
+#| fig-cap: "Nube de palabras de los artículos por medio de prensa."
+#| fig-align: center
+#| fig-pos: "H"
+
 
 ca = prince.CA(
     n_components=2,
@@ -718,24 +741,326 @@ ax.axhline(0, linestyle="--", linewidth=0.8);
 ax.axvline(0, linestyle="--", linewidth=0.8);
 ax.set_xlabel("Dimensión 1");
 ax.set_ylabel("Dimensión 2");
-ax.set_title("Análisis de Correspondencias: Medios y las 100 palabras mas frecuentes");
+ax.set_title("Análisis de Correspondencias: Medios y las 100 palabras más frecuentes");
 ax.legend();
 ax.grid(alpha=0.3);
-plt.show();
+plt.show()
+```
+
+Como ya se vio anteriormente en las nubes de palabras, _Reuters_ y _CNBC_ publican artículos con un vocabulario similar, que en general parecen tratar sobre temas económicos y financieros, así como tambien temas de carácter internacional. _People_ y _The New York Times_ también se ubican próximos y parecen compartir temáticas asociadas a la vida cotidiana, pero también temáticas relacionadas a la política. Finalmente, _The Hill_ se muestra alejado del resto de medios y cercano a términos referentes al gobierno estadounidense. 
+
+# Medio con mayor cantidad de palabras
+
+Si bien estos medios pueden tratar o no temáticas similares, la frecuencia y extención con que lo hacen varía entre ellos. Por esto se analisó el volumen total de palabras contenidas en los artículos publicados por cada medio, así como también el número promedio de palabras en dichos artículos por medio.
+
+```{python}
+df_palabras = df_top_5.copy()
+
+df_palabras["n_palabras"] = (
+    df_palabras["article"]
+    .fillna("")
+    .astype(str)
+    .str.split()
+    .str.len()
+)
+
+total_palabras_por_medio = (
+    df_palabras
+    .groupby("publication")["n_palabras"]
+    .sum()
+    .sort_values(ascending=True)
+)
+
+promedio_palabras_por_medio = (
+    df_palabras
+    .groupby("publication")["n_palabras"]
+    .mean()
+    .reindex(total_palabras_por_medio.index)
+)
+```
+
+```{python}
+#| label: fig-palabras-total-promedio
+#| fig-cap: "Cantidad total y promedio de palabras por artículo según medio de prensa."
+#| fig-align: center
+#| fig-width: 12
+#| fig-height: 6
+#| fig-pos: "H"
+
+fig, axes = plt.subplots(
+    1,
+    2,
+    figsize=(14, 6),
+    constrained_layout=True
+)
+
+# Gráfico 1: total de palabras
+axes[0].barh(
+    total_palabras_por_medio.index,
+    total_palabras_por_medio.values
+)
+
+axes[0].set_xlim(0, total_palabras_por_medio.max() * 1.25);
+axes[0].set_xlabel("Total de palabras", fontsize=11);
+axes[0].set_ylabel("Medio de prensa", fontsize=11);
+axes[0].set_title("Total de palabras", fontsize=13, pad=10);
+axes[0].tick_params(axis="both", labelsize=10);
+axes[0].grid(axis="x", alpha=0.3);
+
+for i, valor in enumerate(total_palabras_por_medio.values):
+    axes[0].text(
+        valor,
+        i,
+        f" {int(valor):,}".replace(",", "."),
+        va="center",
+        fontsize=9
+    )
+
+
+# Gráfico 2: promedio de palabras
+axes[1].barh(
+    promedio_palabras_por_medio.index,
+    promedio_palabras_por_medio.values,
+    color="orange"
+)
+
+axes[1].set_xlim(0, promedio_palabras_por_medio.max() * 1.25);
+axes[1].set_xlabel("Promedio de palabras por artículo", fontsize=11);
+axes[1].set_title("Promedio de palabras por artículo", fontsize=13, pad=10);
+axes[1].tick_params(axis="x", labelsize=10);
+axes[1].grid(axis="x", alpha=0.3);
+
+# Ocultar etiquetas del eje y en el segundo gráfico
+axes[1].set_yticks(range(len(promedio_palabras_por_medio.index)))
+axes[1].set_yticklabels([])
+
+for i, valor in enumerate(promedio_palabras_por_medio.values):
+    axes[1].text(
+        valor,
+        i,
+        f" {valor:.1f}",
+        va="center",
+        fontsize=9
+    )
+
+plt.show()
+```
+
+Se puede observar que, si bien _Reuters_ es el medio con el mayor volumen de palabras es sus artículos, con un total de 2.656.468 palabras, es el que menor promedio de palabras por artículo tiene, con un valor de 281,7. Esto coincide con nuestro análisis inicial en la Figura \ref{fig-top-medios}, donde se muestra que este medio es el que cuenta con la mayor cantidad de artículos, con una amplia diferencia. _The New York Times_ cuenta con un volumen de palabras muy similar a _Reuters_ y a su vez con el mayor promedio de palabras, 905,8 de media. _The Hill_, _People_ y _The New York Times_, en ese orden, cuentan con un volumen mucho menor que los dos medios anteriores y sus promedios se encuentran entre 400 y 600.
+
+\newpage
+
+# Matriz de menciones entre medios
+
+Se creó una matriz de menciones con el conteo de las veces que cada medio de prensa nombra algún otro medio. En esta matriz, cada fila representa el medio que publica el artículo y cada columnael medio mencionado dentro del texto. Para ello se tomó en cuenta tanto las menciones del nombre del medio como de la URL. Se contó cada mención aún si se repite en un mismo artículo.
+
+```{python}
+df_menciones = df_top_5.copy()
+
+texto = (df_menciones["article"].fillna("").astype(str).str.lower())
+
+# patrones_nombre = {"Reuters": r"\breuters\b","CNBC": r"\bcnbc\b",
+#     "The New York Times": r"\bnew york times\b|\bnytimes\b","The Hill": r"\bthe hill\b|\bthehill\b",
+#     "People": r"\bpeople\b|\bpeople\.com\b"}
+# patrones_url = {"Reuters": r"reuters\.com","CNBC": r"cnbc\.com",
+#     "The New York Times": r"nytimes\.com","The Hill": r"thehill\.com","People": r"people\.com"}
+
+medios = df_menciones["publication"].value_counts().index.tolist()
+
+matriz_menciones = pd.DataFrame(
+    0,
+    index=medios,
+    columns=medios
+)
+
+for medio_origen in medios:
+    mask = df_menciones["publication"] == medio_origen
+    textos_medio = texto[mask]
+
+    for medio_mencionado in medios:
+        patron_nombre = patrones_nombre.get(medio_mencionado, None)
+        patron_url = patrones_url.get(medio_mencionado, None)
+
+        conteo_nombre = 0
+        conteo_url = 0
+
+        if patron_nombre is not None:
+            conteo_nombre = (textos_medio.str.count(patron_nombre).sum())
+
+        if patron_url is not None:
+            conteo_url = (textos_medio.str.count(patron_url).sum())
+
+        matriz_menciones.loc[medio_origen, medio_mencionado] = (conteo_nombre + conteo_url)
+```
+
+```{python}
+#| label: fig-matriz-menciones-medios
+#| fig-cap: "Cantidad de menciones cruzadas entre medios de prensa por nombre o URL."
+#| fig-align: center
+#| fig-pos: "H"
+
+fig, ax = plt.subplots(figsize=(9, 7))
+
+im = ax.imshow(matriz_menciones.values, cmap="YlGnBu")
+
+ax.set_xticks(np.arange(len(matriz_menciones.columns)));
+ax.set_yticks(np.arange(len(matriz_menciones.index)));
+
+ax.set_xticklabels(
+    matriz_menciones.columns,
+    rotation=45,
+    ha="right",
+    fontsize=11
+);
+
+ax.set_yticklabels(
+    matriz_menciones.index,
+    fontsize=11
+);
+
+ax.set_xlabel("Medio mencionado", fontsize=12);
+ax.set_ylabel("Medio que publica el artículo", fontsize=12);
+
+ax.set_title(
+    "Menciones cruzadas entre medios por nombre o URL",
+    fontsize=14,
+    pad=12
+);
+
+for i in range(len(matriz_menciones.index)):
+    for j in range(len(matriz_menciones.columns)):
+        ax.text(
+            j,
+            i,
+            int(matriz_menciones.iloc[i, j]),
+            ha="center",
+            va="center",
+            fontsize=11
+        );
+
+fig.colorbar(im, ax=ax, label="Cantidad de menciones");
+
+plt.tight_layout();
+plt.show()
+```
+
+Es razonable pensar, y la matriz así lo muestra en su diagonal, que cada medio se mencione a sí mismo con mayor frecuencia que al resto. En particular, _Reuters_ es el que más se menciona a sí mismo, esto debido a que es el medio con mayor número de artículos y a la vez con mayor volumen de palabras. El medio _People_ parece, sin embargo, ser la excepción, ya que es ampliamente mencionado por el resto de medios, si bien esto probablemente se deba a que en reiteradas ocasiones se hizo uso de la palabra "people" como término en sí y no como referencia al medio. Por último, se puede destacar una cantidad relativamente alta de referencias de _CNBC_ sobre _Reuters_.
+
+
+Adicionalmente se generó un grafo dirigido a partir de la matriz anterior como alternativa para visualizar la relación entre medios según la cantidad de menciones. Cada nodo corresponde a un medio de prensa y cada flecha indica que un medio menciona a otro dentro de sus artículos, el número asociado a cada flecha representa la cantidad de menciones. En este grafo se excluyeron las automenciones para una visualización más clara.
+
+```{python}
+#| label: fig-grafo-menciones-medios
+#| fig-cap: "Grafo dirigido de menciones cruzadas entre medios de prensa."
+#| fig-align: center
+#| fig-pos: "H"
+
+G = nx.DiGraph()
+
+for medio in matriz_menciones.index:
+    G.add_node(medio)
+
+for medio_origen in matriz_menciones.index:
+    for medio_mencionado in matriz_menciones.columns:
+        peso = matriz_menciones.loc[medio_origen, medio_mencionado]
+
+        if medio_origen != medio_mencionado and peso > 0:#Se excluye la diagonal para no mostrar automenciones
+            G.add_edge(medio_origen, medio_mencionado, weight=peso)
+
+fig, ax = plt.subplots(figsize=(9, 7))
+
+pos = nx.circular_layout(G)
+
+weights = np.array([
+    G[u][v]["weight"]
+    for u, v in G.edges()
+])
+
+edge_widths = 0.8 + 4 * (np.log1p(weights) / np.log1p(weights.max()))#Escala logarítmica en grosor de las flechas
+
+node_sizes = []
+for nodo in G.nodes():
+    total_saliente = matriz_menciones.loc[nodo].sum()
+    node_sizes.append(1800 + 2500 * total_saliente / matriz_menciones.sum(axis=1).max())
+
+nx.draw_networkx_nodes(
+    G,
+    pos,
+    node_size=node_sizes,
+    node_color="lightsteelblue",
+    edgecolors="black",
+    linewidths=1.2,
+    ax=ax
+);
+
+nx.draw_networkx_labels(
+    G,
+    pos,
+    font_size=11,
+    font_weight="bold",
+    ax=ax
+);
+
+
+for (u, v), width in zip(G.edges(), edge_widths): #dibujo cada flecha una a una para poder curvarlas
+    if G.has_edge(v, u):
+        rad = 0.22
+    else:
+        rad = 0.10
+
+    nx.draw_networkx_edges(
+        G,
+        pos,
+        edgelist=[(u, v)],
+        width=width,
+        arrows=True,
+        arrowsize=18,
+        arrowstyle="-|>",
+        alpha=0.55,
+        connectionstyle=f"arc3,rad={rad}",
+        min_source_margin=18,
+        min_target_margin=18,
+        ax=ax
+    );
+
+umbral_etiquetas = 50 #etiqueto solo nros grande
+
+edge_labels = {
+    (u, v): G[u][v]["weight"]
+    for u, v in G.edges()
+    if G[u][v]["weight"] >= umbral_etiquetas
+}
+
+nx.draw_networkx_edge_labels(
+    G,
+    pos,
+    edge_labels=edge_labels,
+    font_size=9,
+    label_pos=0.55,
+    rotate=False,
+    bbox=dict(
+        boxstyle="round,pad=0.2",
+        fc="white",
+        ec="none",
+        alpha=0.75
+    ),
+    ax=ax
+);
+
+ax.set_title(
+    "Grafo dirigido de menciones entre medios",
+    fontsize=14,
+    pad=16
+);
+
+ax.axis("off");
+plt.tight_layout();
+plt.show()
 ```
 
 
 
 
-
-
-
-
-
-
-
-
-
-
+En comparación con la matriz, el grafo facilita ver la dirección de las relaciones, aunque puede volverse más difícil de interpretar cuando existen muchas conexiones simultáneas. En términos generales, tanto la matriz como el grafo muestran que los artículos no solo contienen vocabulario propio de cada medio, sino también referencias explícitas a otros medios. Este punto es importante para futuras etapas del análisis, ya que estas menciones podrían funcionar como pistas directas del origen o del contenido editorial de los artículos.
 
 
