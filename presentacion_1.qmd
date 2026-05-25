@@ -1049,3 +1049,16 @@ ax.axis("off");
 plt.tight_layout();
 plt.show()
 ```
+
+
+---
+
+## Preguntas propuestas
+
+- Es posible distinguir el medio de prensa únicamente por su vocabulario? Y si se toma en cuenta también la estructura y estilo de escritura del artículo?
+- Se pueden asociar ciertas temáticas a determinados autores?
+- El título del artículo alcanza para predecir el medio de prensa?
+- Cómo cambia la distribución temática de los artículos a lo largo del tiempo para cada medio de prensa?
+
+
+
