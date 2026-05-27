@@ -1,0 +1,490 @@
+---
+title: "Entrega 1 - Introducción a la Ciencia de Datos"
+author: "Grupo 8: Facundo Morini, Cecilia Waksman"
+date: today
+lang: es
+format:
+  beamer:
+    include-in-header:
+      text: |
+        \usepackage{booktabs}
+        \usepackage{float}
+        \usepackage{graphicx}
+        \setbeamerfont{caption}{size=\scriptsize}
+        \setbeamerfont{caption name}{size=\scriptsize}
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+Sys.unsetenv("RETICULATE_PYTHON")
+Sys.unsetenv("RETICULATE_PYTHON_ENV")
+
+library(reticulate)
+
+use_python(
+  "C:/Users/facur/anaconda3/envs/fertcast/python.exe",
+  required = TRUE
+)
+
+# Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
+```
+
+```{python}
+#| include: false
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import networkx as nx
+from datasets import load_dataset
+import re
+import string
+import math
+from sklearn.feature_extraction.text import CountVectorizer, ENGLISH_STOP_WORDS
+from wordcloud import WordCloud
+import prince
+from adjustText import adjust_text
+import matplotlib.dates as mdates
+```
+
+```{python}
+#| include: false
+# Carga y preparación general
+cache_dir = Path("C:/hf_cache")
+cache_dir.mkdir(parents=True, exist_ok=True)
+
+ds = load_dataset(
+    "tomas-gr/all-the-news-2-1-Component-one-sampled",
+    split="train",
+    cache_dir=str(cache_dir),
+    download_mode="force_redownload"
+)
+
+df = ds.to_pandas()
+
+df["date"] = pd.to_datetime(df["date"], format="mixed")
+df["year"] = pd.to_numeric(df["year"], errors="coerce")
+df["month"] = pd.to_numeric(df["month"], errors="coerce")
+df["day"] = pd.to_numeric(df["day"], errors="coerce")
+
+text_columns = ["author", "title", "article", "url", "section", "publication"]
+df[text_columns] = df[text_columns].astype("string")
+
+# Selección de medios principales
+top_5_publications = df["publication"].value_counts().head(5).reset_index()
+top_5_publications.columns = ["Medio de prensa", "Cantidad de artículos"]
+df_top_5 = df[df["publication"].isin(top_5_publications["Medio de prensa"])].copy()
+```
+
+```{python}
+#| include: false
+# Funciones y procesamiento de texto
+def clean_text(df, column_name):
+    result = df[column_name].str.replace(r"^[^\n]*\n", "", regex=True)
+    result = result.str.lower()
+    punctuation = re.escape(string.punctuation + "—–¿¡«»")
+    result = result.str.replace(f"[{punctuation}\\n]", " ", regex=True)
+    result = result.str.replace(r"\b\S*[^a-zA-Z\sáéíóúüñ]\S*\b", "", regex=True)
+    result = result.str.replace(r"\s+", " ", regex=True).str.strip()
+    return result
+
+df_top_5["CleanText"] = clean_text(df_top_5, "article")
+
+stopwords = list(ENGLISH_STOP_WORDS) + ["s", "u", "say", "said"]
+other_stopwords = {"new", "times", "ms", "cnbc", "reuters", "nyt", "newyorktimes", "york"}
+stopwords_ca = set(stopwords).union(other_stopwords)
+
+df_top_5["CleanText_no_stop_words"] = (
+    df_top_5["CleanText"]
+    .str.replace(r"\b(" + "|".join(stopwords) + r")\b", "", regex=True)
+    .str.replace(r"\s+", " ", regex=True)
+    .str.strip()
+)
+```
+
+```{python}
+#| include: false
+# Datos para evolución temporal
+orden_medios = df_top_5["publication"].value_counts().index.tolist()
+df_top_5["año_mes"] = df_top_5["date"].dt.to_period("M").dt.to_timestamp()
+
+articulos_por_fecha_base = (
+    df_top_5
+    .groupby(["año_mes", "publication"])
+    .size()
+    .reset_index(name="Cantidad")
+)
+
+series_completas = []
+for publication in orden_medios:
+    subset = articulos_por_fecha_base[articulos_por_fecha_base["publication"] == publication].copy()
+    meses_medio = pd.date_range(subset["año_mes"].min(), subset["año_mes"].max(), freq="MS")
+    subset = (
+        subset
+        .set_index("año_mes")
+        .reindex(meses_medio, fill_value=0)
+        .rename_axis("año_mes")
+        .reset_index()
+    )
+    subset["publication"] = publication
+    series_completas.append(subset)
+
+articulos_por_fecha = pd.concat(series_completas, ignore_index=True)
+media_mensual = articulos_por_fecha.groupby("publication")["Cantidad"].mean()
+```
+
+```{python}
+#| include: false
+# Datos para pistas directas del medio
+patrones_nombre = {
+    "Reuters": r"\breuters\b",
+    "CNBC": r"\bcnbc\b",
+    "The New York Times": r"\bnew york times\b|\bnytimes\b",
+    "The Hill": r"\bthe hill\b|\bthehill\b",
+    "People": r"\bpeople\b|\bpeople\.com\b"
+}
+patrones_url = {
+    "Reuters": r"reuters\.com",
+    "CNBC": r"cnbc\.com",
+    "The New York Times": r"nytimes\.com",
+    "The Hill": r"thehill\.com",
+    "People": r"people\.com"
+}
+
+texto_pistas = df_top_5["article"].fillna("").astype(str).str.lower()
+resultados_pistas = []
+for medio in df_top_5["publication"].dropna().unique():
+    mask = df_top_5["publication"] == medio
+    prop_nombre = texto_pistas[mask].str.contains(patrones_nombre[medio], regex=True, na=False).mean() * 100
+    prop_url = texto_pistas[mask].str.contains(patrones_url[medio], regex=True, na=False).mean() * 100
+    resultados_pistas.append({
+        "publication": medio,
+        "Nombre del medio en artículo": prop_nombre,
+        "URL del medio en artículo": prop_url
+    })
+
+df_resultados_pistas = (
+    pd.DataFrame(resultados_pistas)
+    .set_index("publication")
+    .reindex(orden_medios)
+)
+```
+
+```{python}
+#| include: false
+# Datos para análisis de correspondencias
+rows = []
+top_n = 100
+for publication, group in df_top_5.groupby("publication"):
+    texts = group["CleanText_no_stop_words"].dropna().astype(str)
+    vectorizer = CountVectorizer()
+    word_matrix = vectorizer.fit_transform(texts)
+    word_counts = word_matrix.sum(axis=0).A1
+    words = vectorizer.get_feature_names_out()
+    freq_df = pd.DataFrame({"publication": publication, "word": words, "count": word_counts})
+    rows.append(freq_df.sort_values("count", ascending=False).head(top_n))
+
+top_words_df = pd.concat(rows, ignore_index=True)
+df_ac = top_words_df[~top_words_df["word"].isin(stopwords_ca)].copy()
+
+top_100_words = (
+    df_ac.groupby("word")["count"]
+    .sum()
+    .sort_values(ascending=False)
+    .head(100)
+    .index
+)
+
+df_ac = df_ac[df_ac["word"].isin(top_100_words)]
+tabla_ac = df_ac.pivot_table(
+    index="publication",
+    columns="word",
+    values="count",
+    aggfunc="sum",
+    fill_value=0
+)
+```
+
+```{python}
+#| include: false
+# Datos para menciones cruzadas
+matriz_menciones = pd.DataFrame(0, index=orden_medios, columns=orden_medios)
+texto_menciones = df_top_5["article"].fillna("").astype(str).str.lower()
+
+for medio_origen in orden_medios:
+    mask = df_top_5["publication"] == medio_origen
+    textos_medio = texto_menciones[mask]
+    for medio_mencionado in orden_medios:
+        conteo_nombre = textos_medio.str.count(patrones_nombre[medio_mencionado]).sum()
+        conteo_url = textos_medio.str.count(patrones_url[medio_mencionado]).sum()
+        matriz_menciones.loc[medio_origen, medio_mencionado] = conteo_nombre + conteo_url
+```
+
+## Datos y objetivo
+
+\small
+
+:::: columns
+::: {.column width="50%"}
+**Datos utilizados**
+
+- Dataset: *All the News 2.1 -- Component One*.
+- 30.213 artículos periodísticos.
+- Período: 2016--2020.
+- 26 medios de prensa.
+- Variables centrales: fecha, medio, título, cuerpo del artículo, autor, URL y sección.
+:::
+
+::: {.column width="50%"}
+**Objetivo**
+
+Realizar un análisis exploratorio de artículos periodísticos de distintos medios, con el fin de:
+
+- estudiar la estructura y calidad del dataset;
+- analizar la distribución de artículos entre medios;
+- limpiar y normalizar el texto para estudiar patrones de vocabulario;
+- comparar los cinco medios principales mediante visualizaciones descriptivas.
+
+:::
+::::
+
+---
+
+## Medios seleccionados y cobertura temporal
+
+```{python}
+#| fig-cap: "Cantidad mensual de artículos publicados por los cinco medios principales."
+#| fig-align: center
+#| fig-width: 8.5
+#| fig-height: 4.8
+
+fig, ax = plt.subplots(figsize=(9, 5.4))
+for publication in orden_medios:
+    subset = articulos_por_fecha[articulos_por_fecha["publication"] == publication]
+    linea, = ax.plot(
+        subset["año_mes"],
+        subset["Cantidad"],
+        linewidth=1.8,
+        label=f"{publication} (media = {media_mensual[publication]:.1f})",
+        alpha=0.8
+    )
+    color = linea.get_color()
+    ax.scatter(subset["año_mes"], subset["Cantidad"], s=14, alpha=0.7, color=color)
+    ax.hlines(
+        y=media_mensual[publication],
+        xmin=subset["año_mes"].min(),
+        xmax=subset["año_mes"].max(),
+        linestyle="--",
+        linewidth=0.9,
+        alpha=0.45,
+        color=color
+    )
+
+ax.set_xlabel("Fecha")
+ax.set_ylabel("Cantidad de artículos")
+ax.set_title("Artículos publicados mensualmente por cada medio", pad=10)
+ax.grid(True, which="major", axis="both", alpha=0.3)
+ax.xaxis.set_major_locator(mdates.YearLocator())
+ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+ax.legend(title="Medio", fontsize=8, title_fontsize=9, bbox_to_anchor=(1.02, 1), loc="upper left")
+plt.tight_layout()
+plt.show()
+```
+
+\footnotesize
+
+Los cinco medios reúnen **18.771 artículos**, equivalente al **62,42\%** del total.
+
+---
+
+## Limpieza del texto y pistas directas
+
+:::: columns
+::: {.column width="42%"}
+**Normalización aplicada**
+
+- Minúsculas.
+- Eliminación de encabezados iniciales.
+- Sustitución de puntuación, símbolos y números.
+- Normalización de espacios.
+- Filtrado posterior de *stopwords*.
+:::
+
+::: {.column width="58%"}
+```{python}
+#| fig-cap: "Porcentaje de artículos con pistas directas del medio."
+#| fig-align: center
+#| fig-width: 7
+#| fig-height: 4.4
+
+fig, ax = plt.subplots(figsize=(7, 4.4))
+tipos_pistas = df_resultados_pistas.columns.tolist()
+y = np.arange(len(df_resultados_pistas.index))
+height = 0.28
+for i, tipo in enumerate(tipos_pistas):
+    ax.barh(y + (i - 0.5) * height, df_resultados_pistas[tipo], height=height, label=tipo)
+
+ax.set_yticks(y)
+ax.set_yticklabels(df_resultados_pistas.index, fontsize=9)
+ax.invert_yaxis()
+ax.set_xlabel("Porcentaje de artículos")
+ax.set_title("Pistas directas dentro del texto", pad=10)
+ax.grid(axis="x", alpha=0.3)
+ax.legend(fontsize=8, loc="lower right")
+plt.tight_layout()
+plt.show()
+```
+:::
+::::
+
+---
+
+## Vocabulario por medio
+
+```{python}
+#| fig-cap: "Nubes de palabras por medio, luego de filtrar stopwords."
+#| fig-align: center
+#| fig-width: 9
+#| fig-height: 5.7
+
+def plot_wordclouds_by_publication(df, text_col="CleanText_no_stop_words", pub_col="publication", max_words=50, cols=2):
+    publications = df[pub_col].dropna().unique()
+    rows = math.ceil(len(publications) / cols)
+    fig, axes = plt.subplots(rows, cols, figsize=(9, 2.4 * rows))
+    axes = axes.flatten()
+
+    for i, publication in enumerate(publications):
+        text = " ".join(df.loc[df[pub_col] == publication, text_col].dropna().astype(str))
+        wordcloud = WordCloud(
+            width=900,
+            height=360,
+            background_color="white",
+            stopwords=stopwords_ca,
+            max_words=max_words,
+            collocations=False,
+            random_state=123
+        ).generate(text)
+        axes[i].imshow(wordcloud, interpolation="bilinear")
+        axes[i].set_title(publication, fontsize=10)
+        axes[i].axis("off")
+
+    for j in range(i + 1, len(axes)):
+        axes[j].axis("off")
+
+    plt.tight_layout()
+    plt.show()
+
+plot_wordclouds_by_publication(df_top_5)
+```
+
+---
+
+## Correspondencias: asociación medio-palabra
+
+```{python}
+#| fig-cap: "Análisis de correspondencias entre medios y palabras frecuentes."
+#| fig-align: center
+#| fig-width: 8.5
+#| fig-height: 5.8
+
+ca = prince.CA(n_components=2, n_iter=100, random_state=123)
+ca = ca.fit(tabla_ac)
+row_coords = ca.row_coordinates(tabla_ac)
+col_coords = ca.column_coordinates(tabla_ac)
+
+palabras = [
+    "democrats", "senate", "capitol", "dc", "washington", "campaign", "house", "trump",
+    "market", "markets", "financial", "bank", "billion", "shares", "investors", "oil",
+    "economy", "trade", "family", "life", "like", "work", "american", "political", "white", "mr"
+];
+palabras_mostrar = [p for p in palabras if p in col_coords.index];
+palabras_no_mostrar = [p for p in col_coords.index if p not in palabras];
+
+fig, ax = plt.subplots(figsize=(8.5, 5.8))
+ax.scatter(col_coords.loc[palabras_no_mostrar, 0], col_coords.loc[palabras_no_mostrar, 1], alpha=0.25, s=18);
+ax.scatter(col_coords.loc[palabras_mostrar, 0], col_coords.loc[palabras_mostrar, 1], alpha=0.9, s=42);
+
+texts = [];
+for palabra in palabras_mostrar:
+    texts.append(ax.text(col_coords.loc[palabra, 0], col_coords.loc[palabra, 1], palabra, fontsize=8));
+
+ax.scatter(row_coords[0], row_coords[1], color="black", s=60, label="Medios");
+offset_medios = {
+    "The New York Times": (0.04, 0.05),
+    "People": (-0.05, -0.06),
+    "CNBC": (0.02, 0.03),
+    "Reuters": (0.02, -0.05),
+    "The Hill": (0.02, 0.03)
+}
+for medio in row_coords.index:
+    dx, dy = offset_medios.get(medio, (0.02, 0.02));
+    ax.text(
+        row_coords.loc[medio, 0] + dx,
+        row_coords.loc[medio, 1] + dy,
+        medio,
+        fontsize=9,
+        fontweight="bold",
+        color="black",
+        ha="right" if dx < 0 else "left",
+        va="center"
+    );
+
+adjust_text(texts, ax=ax, max_move=(6, 6), expand=(1.03, 1.06));
+ax.axhline(0, linestyle="--", linewidth=0.8);
+ax.axvline(0, linestyle="--", linewidth=0.8);
+ax.set_xlabel("Dimensión 1");
+ax.set_ylabel("Dimensión 2");
+ax.set_title("Medios y palabras más asociadas");
+ax.legend(fontsize=8);
+ax.grid(alpha=0.3);
+plt.tight_layout();
+plt.show();
+```
+
+---
+
+## Menciones cruzadas y cierre
+
+:::: columns
+::: {.column width="56%"}
+```{python}
+#| fig-cap: "Menciones cruzadas entre medios por nombre o URL."
+#| fig-align: center
+#| fig-width: 6.8
+#| fig-height: 5
+
+fig, ax = plt.subplots(figsize=(6.8, 5));
+im = ax.imshow(matriz_menciones.values, cmap="YlGnBu");
+
+ax.set_xticks(np.arange(len(matriz_menciones.columns)));
+ax.set_yticks(np.arange(len(matriz_menciones.index)));
+ax.set_xticklabels(matriz_menciones.columns, rotation=45, ha="right", fontsize=8);
+ax.set_yticklabels(matriz_menciones.index, fontsize=8);
+ax.set_xlabel("Medio mencionado", fontsize=9);
+ax.set_ylabel("Medio que publica", fontsize=9);
+ax.set_title("Menciones cruzadas", fontsize=11, pad=10);
+
+for i in range(len(matriz_menciones.index)):
+    for j in range(len(matriz_menciones.columns)):
+        ax.text(j, i, int(matriz_menciones.iloc[i, j]), ha="center", va="center", fontsize=7);
+
+fig.colorbar(im, ax=ax, label="Menciones");
+plt.tight_layout();
+plt.show();
+```
+:::
+\footnotesize
+::: {.column width="44%"}
+**Preguntas propuestas**
+
+- Es posible distinguir el medio de prensa únicamente por su
+vocabulario? Y si se toma en cuenta también la estructura y
+estilo de escritura del artículo?
+- Se pueden asociar ciertas temáticas a determinados autores?
+- El título del artículo alcanza para predecir el medio de prensa?
+- Cómo cambia la distribución temática de los artículos a lo
+largo del tiempo para cada medio de prensa?
+::::
