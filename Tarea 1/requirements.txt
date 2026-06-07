@@ -1,0 +1,10 @@
+numpy
+pandas
+matplotlib
+seaborn
+networkx
+datasets
+scikit-learn
+wordcloud
+prince
+adjustText

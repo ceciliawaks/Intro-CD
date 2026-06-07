@@ -1,0 +1,253 @@
+---
+title: "Entrega 2 - Introducción a la Ciencia de Datos"
+author: "Grupo 8: Facundo Morini, Cecilia Waksman"
+date: today
+lang: es
+format:
+  pdf:
+    titlepage: true
+    include-in-header:
+      text: |
+        \usepackage{booktabs}
+        \usepackage{float}
+execute:
+    echo: false
+    warning: false
+    message: false
+---
+
+```{r}
+# library(reticulate)
+
+# use_python(
+#   "C:/Users/facur/anaconda3/envs/fertcast/python.exe",
+#   required = TRUE
+# )
+
+# Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
+```
+
+```{python}
+from time import time
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from datasets import load_dataset
+
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from sklearn.decomposition import PCA
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    ConfusionMatrixDisplay,
+    classification_report,
+)
+```
+
+```{python}
+ds = load_dataset("tomas-gr/all-the-news-2-1-Component-one-sampled", split="train", cache_dir="../data")
+df = ds.to_pandas()
+```
+
+# Parte 1: Dataset y representación numérica de texto
+
+## 1. Preparación del dataset
+Se utilizará un conjunto de datos reducido de los **tres medios de prensa con mayor cantidad de artículos**.
+Se espera que utilice su propia versión de la función `clean_text()` de la Tarea 1.
+
+Particione los datos para generar un conjunto de test del 30% del total, utilizando muestreo estratificado.
+
+**Sugerencia**: utilice el parámetro `stratify` de la función `train_test_split` de scikit-learn y fije también el valor de `random_state` para obtener resultados reproducibles.
+
+```{python}
+
+def clean_text(df, column_name):
+    # TODO: copie y complete aquí su versión de clean_text() de la Tarea 1
+
+    # Eliminar primeras palabras hasta el primer "\n"
+    result = df[column_name].str.replace(r"^[^\n]*\n", "", regex=True)
+
+    # Convertir todo a minúsculas
+    result = result.str.lower()
+
+    # TODO: completar signos de puntuación y demás normalizaciones de la Tarea 1
+    for punc in ["[", "\n", ",", ":", "?"]:
+        result = result.str.replace(punc, " ")
+
+    return result
+```
+
+```{python}
+
+# TODO: Obtenga los tres medios con mayor cantidad de artículos y filtre el DataFrame
+# top_3_publications = ...
+# df_top_3 = ...
+
+# Aplique clean_text sobre la columna de texto elegida y cree una nueva columna "CleanText"
+# df_top_3["CleanText"] = ...
+```
+
+```{python}
+# TODO: Particione los datos en train y test (30% test), con muestreo estratificado
+# X = df_top_3["CleanText"]
+# y = df_top_3["publication"]
+
+```
+
+## 2. Verificación del balance de clases
+Genere una visualización que permita verificar que el balance de artículos de cada medio es similar en train y test.
+
+```{python}
+# TODO: Genere una visualización que muestre la proporción de artículos de cada medio
+# en los conjuntos de train y test.
+
+```
+
+## 3. Representación Bag of Words
+Transforme el texto del conjunto de entrenamiento a una representación numérica (features) de conteo de palabras (*bag of words*).
+Explique brevemente cómo funciona esta técnica y muestre un ejemplo.
+En particular, explique el tamaño de la matriz resultante y la razón por la que es una matriz *sparse*.
+
+**Sugerencia**: puede ser útil imaginar qué sucedería con la memoria RAM requerida si no estuviéramos trabajando con un conjunto de datos reducido.
+
+```{python}
+
+# TODO: Transforme el texto de entrenamiento a una representación Bag of Words
+
+# Muestre el tamaño de la matriz resultante
+
+# Muestre un ejemplo: las primeras palabras del vocabulario y sus conteos en un documento
+
+```
+
+# 4. Representación TF-IDF
+Explique brevemente qué es un **n-grama**.
+Obtenga la representación numérica *Term Frequency - Inverse Document Frequency* (TF-IDF).
+Explique brevemente en qué consiste esta transformación adicional.
+
+```{python}
+# TODO: Obtenga la representación TF-IDF del conjunto de entrenamiento
+
+# Muestre el tamaño de la matriz resultante
+
+
+```
+
+## 5. Visualización PCA sobre TF-IDF
+Muestre en un mapa el conjunto de entrenamiento, utilizando las dos primeras componentes PCA sobre los vectores de TF-IDF.
+Analice los resultados y compare qué sucede si utiliza:
+- a) el filtrado de `stop_words` para idioma inglés;
+- b) el parámetro `use_idf=True`;
+- c) `ngram_range=(1,2)`.
+
+Opcionalmente, también puede analizar qué sucede si no elimina los signos de puntuación.
+
+¿Se pueden separar los medios de prensa utilizando sólo 2 componentes principales?
+Haga una visualización que permita entender cómo varía la varianza explicada a medida que se agregan componentes (por ejemplo, hasta 10 componentes).
+
+Discuta además si la separación observada puede deberse a diferencias de estilo editorial, a diferencias temáticas o a pistas explícitas del medio que no hayan sido removidas en la limpieza.
+
+```{python}
+
+# TODO: Aplique PCA con 2 componentes sobre X_train_tfidf y grafique los resultados,
+# coloreando los puntos según el medio de prensa.
+
+```
+
+```{python}
+# TODO: Compare los resultados de PCA con distintas configuraciones del TfidfVectorizer:
+
+```
+
+```{python}
+# TODO: Genere una visualización que muestre cómo varía la varianza explicada
+# a medida que se agregan componentes PCA (por ejemplo, hasta 10 componentes).
+
+```
+
+# Parte 2: Entrenamiento y Evaluación de Modelos
+
+## 1. Multinomial Naive Bayes
+Entrene el modelo *Multinomial Naive Bayes* para clasificar los artículos según a qué medio de prensa pertenece el texto.
+Utilice dicho modelo para clasificar los artículos del conjunto de test, y reporte el valor de *accuracy* y la **matriz de confusión**.
+Reporte además el valor de *precision* y *recall* para cada medio.
+Explique cómo se relacionan estos valores con la matriz anterior.
+
+¿Qué problemas puede tener el hecho de mirar solamente el valor de *accuracy*?
+Considere qué sucedería con esta métrica si el desbalance de datos fuera aún mayor entre medios.
+
+**Sugerencia**: utilice el método `from_predictions` de `ConfusionMatrixDisplay` para realizar la matriz.
+
+```{python}
+
+# TODO: Entrene Multinomial Naive Bayes sobre X_train_tfidf
+
+```
+
+```{python}
+# TODO: Genere una visualización (por ejemplo, gráfico de violín) que compare
+# la accuracy de los distintos modelos entrenados en GridSearchCV,
+# mostrando la variabilidad en los distintos splits.
+
+```
+
+## 3. Entrenamiento final con el mejor modelo
+Elija el mejor modelo (mejores parámetros) y vuelva a entrenar sobre todo el conjunto de entrenamiento disponible (sin quitar datos para validación).
+Reporte el valor final de las métricas y la matriz de confusión.
+Discuta las limitaciones de utilizar un modelo basado en *bag of words* o TF-IDF para el análisis de texto.
+
+
+```{pyhton}
+# TODO: Entrene el mejor modelo sobre todo el conjunto de entrenamiento
+
+```
+
+```{pyhton}
+# TODO: Evalúe el mejor modelo sobre el conjunto de test y reporte métricas finales
+
+```
+
+## 4. Modelo alternativo
+Evalúe al menos un modelo más (dentro de scikit-learn) aparte de *Multinomial Naive Bayes* para clasificar el texto utilizando las mismas *features* de texto.
+Explique brevemente cómo funciona y compare los resultados con el anterior.
+
+```{pyhton}
+# TODO: Entrene al menos un modelo alternativo de scikit-learn
+
+```
+
+## 5. Cambio de medio de prensa
+Evalúe el problema cambiando al menos un medio de prensa.
+En particular, observe el (des)balance de datos y los problemas que pueda generar, así como cualquier indicio que pueda ver en el mapeo previo con PCA.
+Puede ser útil comentar acerca de técnicas como sobre-muestreo y submuestreo; no es necesario implementarlas.
+
+```{pyhton}
+# TODO: Seleccione una combinación diferente de tres medios de prensa (cambiando al menos uno)
+# y repita el proceso de entrenamiento y evaluación.
+
+# Analice el balance de clases en este nuevo conjunto de datos
+# ...
+```
+
+## 6. Técnica alternativa de extracción de features
+Busque información sobre al menos una técnica alternativa de extraer *features* de texto.
+Explique brevemente cómo funciona y qué tipo de diferencias esperaría en los resultados.
+No se espera que implemente nada en esta parte.
+
+*TODO: Escriba su análisis en el informe.*
+
+## 7. Opcional: Clasificación a nivel de título
+Repita la clasificación con los tres medios de prensa originales, pero esta vez clasificando a nivel de **título** en lugar de artículo completo.
+
+```{pyhton}
+# Opcional: Repita el pipeline de clasificación utilizando el título del artículo
+# en lugar del cuerpo del texto.
+
+```
+
