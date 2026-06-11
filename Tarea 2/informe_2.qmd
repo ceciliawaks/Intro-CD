@@ -17,14 +17,14 @@ execute:
 ---
 
 ```{r}
-# library(reticulate)
+library(reticulate)
 
 # use_python(
 #   "C:/Users/facur/anaconda3/envs/fertcast/python.exe",
 #   required = TRUE
 # )
 
-# Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
+Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
 ```
 
 ```{python}
@@ -35,6 +35,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import re
+import string
 
 from datasets import load_dataset
 
@@ -53,6 +55,22 @@ from sklearn.metrics import (
 ```{python}
 ds = load_dataset("tomas-gr/all-the-news-2-1-Component-one-sampled", split="train", cache_dir="../data")
 df = ds.to_pandas()
+
+df["date"] = pd.to_datetime(df["date"], format="mixed")
+df["year"] = pd.to_numeric(df["year"], errors="coerce")
+df["month"] = pd.to_numeric(df["month"], errors="coerce")
+df["day"] = pd.to_numeric(df["day"], errors="coerce")
+
+text_columns = [
+    "author",
+    "title",
+    "article",
+    "url",
+    "section",
+    "publication"
+]
+
+df[text_columns] = df[text_columns].astype("string")
 ```
 
 # Parte 1: Dataset y representación numérica de texto
@@ -68,44 +86,104 @@ Particione los datos para generar un conjunto de test del 30% del total, utiliza
 ```{python}
 
 def clean_text(df, column_name):
-    # TODO: copie y complete aquí su versión de clean_text() de la Tarea 1
 
-    # Eliminar primeras palabras hasta el primer "\n"
-    result = df[column_name].str.replace(r"^[^\n]*\n", "", regex=True)
+    # Eliminar encabezado hasta el primer salto de línea
+    result = df[column_name].str.replace(
+        r"^[^\n]*\n",
+        "",
+        regex=True
+    )
 
-    # Convertir todo a minúsculas
+    # Minúsculas
     result = result.str.lower()
 
-    # TODO: completar signos de puntuación y demás normalizaciones de la Tarea 1
-    for punc in ["[", "\n", ",", ":", "?"]:
-        result = result.str.replace(punc, " ")
+    # Reemplazar puntuación y saltos de línea por espacios
+    punctuation = re.escape(string.punctuation + "—–¿¡«»")
+    result = result.str.replace(
+        f"[{punctuation}\\n]",
+        " ",
+        regex=True
+    )
+
+    # Eliminar palabras que contengan caracteres no permitidos
+    result = result.str.replace(
+        r"\b\S*[^a-zA-Z\sáéíóúüñ]\S*\b",
+        "",
+        regex=True
+    )
+
+    # Eliminar espacios múltiples
+    result = result.str.replace(
+        r"\s+",
+        " ",
+        regex=True
+    ).str.strip()
 
     return result
 ```
 
 ```{python}
 
-# TODO: Obtenga los tres medios con mayor cantidad de artículos y filtre el DataFrame
-# top_3_publications = ...
-# df_top_3 = ...
+top_3_publications = df["publication"].value_counts().head(3).reset_index()
+top_3_publications.columns = [
+    "Medio de prensa",
+    "Cantidad de artículos"]
 
-# Aplique clean_text sobre la columna de texto elegida y cree una nueva columna "CleanText"
-# df_top_3["CleanText"] = ...
+df_top_3 = (
+    df[df["publication"].isin(top_3_publications["Medio de prensa"])]
+    .copy()
+)
+
+df_top_3["CleanText"] = clean_text(df_top_3, "article")
+
+df_top_3 = df_top_3.dropna(
+    subset=["CleanText", "publication"]
+).copy()
+
 ```
 
 ```{python}
 # TODO: Particione los datos en train y test (30% test), con muestreo estratificado
-# X = df_top_3["CleanText"]
-# y = df_top_3["publication"]
+X = df_top_3["CleanText"]
+y = df_top_3["publication"]
+
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=33, stratify=y)
+
+#print(X_train.shape) #10262
+#print(X_test.shape) #4398
 
 ```
 
 ## 2. Verificación del balance de clases
-Genere una visualización que permita verificar que el balance de artículos de cada medio es similar en train y test.
 
 ```{python}
 # TODO: Genere una visualización que muestre la proporción de artículos de cada medio
 # en los conjuntos de train y test.
+
+dist_total = y.value_counts(normalize=True);
+dist_train = y_train.value_counts(normalize=True);
+dist_test = y_test.value_counts(normalize=True);
+
+dist_df = pd.concat(
+    [dist_total, dist_train, dist_test],
+    axis=1
+);
+dist_df.columns = ["Total", "Train", "Test"];
+
+#print(dist_df)
+dist_df.plot(
+    kind="bar",
+    figsize=(8, 5)
+);
+
+plt.ylabel("Proporción");
+plt.xlabel("Medio de prensa");
+plt.title("Balance de clases");
+plt.xticks(rotation=45);
+plt.legend();
+plt.tight_layout();
+plt.show()
 
 ```
 
@@ -116,6 +194,8 @@ En particular, explique el tamaño de la matriz resultante y la razón por la qu
 
 **Sugerencia**: puede ser útil imaginar qué sucedería con la memoria RAM requerida si no estuviéramos trabajando con un conjunto de datos reducido.
 
+## Respuesta
+
 ```{python}
 
 # TODO: Transforme el texto de entrenamiento a una representación Bag of Words
@@ -124,7 +204,81 @@ En particular, explique el tamaño de la matriz resultante y la razón por la qu
 
 # Muestre un ejemplo: las primeras palabras del vocabulario y sus conteos en un documento
 
+count_vect = CountVectorizer()
+X_train_bow = count_vect.fit_transform(X_train)
+X_test_bow = count_vect.transform(X_test)
+
+#X_train_bow.shape #(10262, 82287)
+#X_test_bow.shape #(4398, 82287)
+
+#print(list(count_vect.vocabulary_.keys())[:20])
+
 ```
+
+```{python}
+# promedio_palabras = (
+#     df_top_3["CleanText"]
+#     .dropna()
+#     .str.split()
+#     .str.len()
+#     .mean()
+# )
+
+# print(promedio_palabras)#424
+
+# cant_palabras = (
+#     df_top_3["CleanText"]
+#     .dropna()
+#     .str.split()
+#     .str.len()
+# )
+# 
+# print(cant_palabras.max()) # 12069
+```
+
+
+El funcionamiento de la técnica BOW se basa en generar una matriz donde cada fila representa, en este caso, un artículo y cada columna una palabra distinta que aparezca en el conjunto de todos los artículos del dataset. Los elementos de la matriz son el conteo de la respectiva palabra en el correspondiente artículo.
+
+Como tenemos un set de entrenamiento y otro de testeo, tendremos 2 matrices. En ambos casos las columas representan las distintas palabras que aparecen en los artículos del set de entrenamiento. La matriz generada para el set de entrenamiento es de dimensiones $(10262, 82287)$ y la generada para el set de testeo de $(4398, 82287)$.
+
+Veamos como ejemplo los primeros 5 artículos de la matriz correspondiente al set de entrenamiento. Elegimos las palabras de forma que al menos un elemento sea distinto de 0:
+
+```{python}
+#| results: asis
+
+feature_names = count_vect.get_feature_names_out()
+
+fila = 0
+
+# Columnas con valores distintos de cero
+columnas = X_train_bow[fila].nonzero()[1][:6]
+
+ejemplo_bow = pd.DataFrame(
+    X_train_bow[:5][:, columnas].toarray(),
+    columns=feature_names[columnas]
+)
+
+latex_tabla=ejemplo_bow.to_latex(
+    index=False,
+    escape=True,
+#    column_format="p{0.42\\textwidth}p{0.42\\textwidth}",
+#    caption="Ejemplo de representación Bag of Words.",
+    label="tab:ejemplo_bow"
+)
+latex_tabla = latex_tabla.replace(
+    "\\begin{table}",
+    "\\begin{table}[H]\n\\centering\n\\scriptsize"
+)
+
+print(latex_tabla)
+
+```
+
+
+Tomando en cuenta que la cantidad promedio de palabras por artículo en nuestro dataset, de únicamente los 3 medios de prensa con más publicaciones, es $424\ll 82287$, es comprensible suponer que ambas matrices son esparzas, ya que la mayoría de elemento serán entonces 0. Es aún más facil de ver si comparamos ahora con la cantidad de palabras en el artículo que cuenta con el mayor número de palabras, $12069 < 82287$, es decir que aún en la fila correspondiente a este artículo, la amplia mayoría de elementos serán 0.
+
+Si almacenáramos estas matrices en la forma clásica, habría que guardar $10262 \times 82287=844.429.194$ valores y $4398 \times 82287=361.898.226$ valores, respectivamente, lo cual ocuparía mucha memorí, por lo que utilizaremos el hecho de que ambas son matrices esparzas a favor para almacenarlas de manera más eficiente: utilizaremos la representación *sparce* de *scikit-learn*, la cual almacena solo las posiciones y valores de los elementos distintos de cero.
+
 
 # 4. Representación TF-IDF
 Explique brevemente qué es un **n-grama**.
