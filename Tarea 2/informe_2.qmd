@@ -25,6 +25,7 @@ library(reticulate)
 # )
 
 Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
+
 ```
 
 ```{python}
@@ -246,31 +247,30 @@ Veamos como ejemplo los primeros 5 artículos de la matriz correspondiente al se
 ```{python}
 #| results: asis
 
-feature_names = count_vect.get_feature_names_out()
+bow_names = count_vect.get_feature_names_out()
 
 fila = 0
 
 # Columnas con valores distintos de cero
-columnas = X_train_bow[fila].nonzero()[1][:6]
+columnas_bow = X_train_bow[fila].nonzero()[1][:6]
 
 ejemplo_bow = pd.DataFrame(
-    X_train_bow[:5][:, columnas].toarray(),
-    columns=feature_names[columnas]
+    X_train_bow[:5][:, columnas_bow].toarray(),
+    columns=bow_names[columnas_bow]
 )
 
-latex_tabla=ejemplo_bow.to_latex(
+tabla_bow=ejemplo_bow.to_latex(
     index=False,
     escape=True,
-#    column_format="p{0.42\\textwidth}p{0.42\\textwidth}",
-#    caption="Ejemplo de representación Bag of Words.",
+    caption="Ejemplo de representación Bag of Words.",
     label="tab:ejemplo_bow"
 )
-latex_tabla = latex_tabla.replace(
+tabla_bow = tabla_bow.replace(
     "\\begin{table}",
     "\\begin{table}[H]\n\\centering\n\\scriptsize"
 )
 
-print(latex_tabla)
+print(tabla_bow)
 
 ```
 
@@ -285,13 +285,69 @@ Explique brevemente qué es un **n-grama**.
 Obtenga la representación numérica *Term Frequency - Inverse Document Frequency* (TF-IDF).
 Explique brevemente en qué consiste esta transformación adicional.
 
+# Respuesta
+
+Un **n-grama** consiste en una secuencia de n elementos contiguos. En nuestro caso, se podría usar como alternativa a la representación BOW, tomando, en lugar de todas las palabras simples, todas las secuencias  de largo n de palabras de los artículos, con n a determinar. A este tipo de representaciones se las conoce como **Bag-of-ngrams**. Se podría decir que la representación BOW es solo un caso partícular de esta donde $n=1$.
+
+La representación TF-IDF ataca un problema presente en la representación BOW: los conteos absolutos se ven afectados por el largo del texto. En general se espera que en promedio textos más largos presenten más veces cada palabra. El componente TF de esta nueva representación se encarga de devolver la frecuencia relativa de cada palabra por texto, es decir que:
+
+$$TF_{t,p}=\frac{\text{conteo de la palabra p en el texto t}}{\text{conteo total de palabras en el texto t}}$$
+
+Además se agrega un componente que pondera cada palabra de un cierto texto por el logaritmo de la razón entre el total de palabras en todos los textos y la cantidad de veces que aparece dicha palabra en todo el conjunto de textos:
+
+$$IDF_{p}=\frac{\text{cantidad total de textos}}{\text{cantidad de textos que contienen la palabra p}}$$
+
+Su efecto sobre las palabras genera que aquéllas que aparecen en muchos textos cuenten con un valor relativamente menor, entendíendose que estas son más genéricas (por ejemplo: "the", "and", "a"), mientras que las que aparecen en un menor número de textos son más informativas sobre el contexto de los mismos y por ende cuentan con un valor relativamente mayor.
+
+La representación _Term Frequency - Inverse Document Frequency_ se calcula entonces como el producto entre los dos componentes anteriores:
+
+$$TF \times IDF$$
+
+
+Continuando con las mismas palabras del ejemplo anterior, vemos esta vez su representación TF-IDF:
+
 ```{python}
+#| results: asis
+
+
 # TODO: Obtenga la representación TF-IDF del conjunto de entrenamiento
 
 # Muestre el tamaño de la matriz resultante
 
+tfidf_vect = TfidfVectorizer()
+X_train_tfidf = tfidf_vect.fit_transform(X_train)
+X_test_tfidf = tfidf_vect.transform(X_test)
+
+# print(X_train_tfidf.shape)#(10262, 82287)
+# print(X_test_tfidf.shape)#(4398, 82287)
+
+tfidf_names = tfidf_vect.get_feature_names_out()
+
+# Elegir 6 palabras presentes en el primer documento
+columnas_tfidf = X_train_tfidf[0].nonzero()[1][:6]
+
+ejemplo_tfidf = pd.DataFrame(
+    X_train_tfidf[:5][:, columnas_tfidf].toarray(),
+    columns=tfidf_names[columnas_tfidf]
+).round(4)
+
+tabla_tfidf=ejemplo_tfidf.to_latex(
+    index=False,
+    escape=True,
+    float_format="%.4f",
+    caption="Ejemplo de representación TF-IDF.",
+    label="tab:ejemplo_tfidf"
+)
+tabla_tfidf = tabla_tfidf.replace(
+    "\\begin{table}",
+    "\\begin{table}[H]\n\\centering\n\\scriptsize"
+)
+
+print(tabla_tfidf)
 
 ```
+
+La mayoría de las palabras de ejemplo, donde el valor de representación no es nulo, cuentan con valores en torno a 0.125, la única palabra que se diferencia en este caso es "Reuters", nombre de uno de los medios de prensa que publica los artículos. Es posible que la misma cuente con un valor menor, ya que no es una palabra muy frecuente dentro de cada texto del ejemplo particular, por lo que su valor de _TF_ sería bajo. Pero también puede deberse a que el medio de prensa es uno de los que más se menciona a sí mismos en los artículos que publica, sumado a que es el medio con el mayor número de artículos publicados (ambos resultados se vieron en la tarea 1 entregada anteriormente), por lo que su IDF la ponderaría con un valor relativamente más bajo.
 
 ## 5. Visualización PCA sobre TF-IDF
 Muestre en un mapa el conjunto de entrenamiento, utilizando las dos primeras componentes PCA sobre los vectores de TF-IDF.
