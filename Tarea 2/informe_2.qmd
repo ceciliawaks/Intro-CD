@@ -42,8 +42,8 @@ import string
 from datasets import load_dataset
 
 from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
-from sklearn.decomposition import PCA
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer, ENGLISH_STOP_WORDS
+from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.metrics import (
     accuracy_score,
@@ -242,6 +242,8 @@ El funcionamiento de la técnica BOW se basa en generar una matriz donde cada fi
 
 Como tenemos un set de entrenamiento y otro de testeo, tendremos 2 matrices. En ambos casos las columas representan las distintas palabras que aparecen en los artículos del set de entrenamiento. La matriz generada para el set de entrenamiento es de dimensiones $(10262, 82287)$ y la generada para el set de testeo de $(4398, 82287)$.
 
+**Si no es necesario para la parte 2 procesar el set de testeo, borrar esto del texto.**
+
 Veamos como ejemplo los primeros 5 artículos de la matriz correspondiente al set de entrenamiento. Elegimos las palabras de forma que al menos un elemento sea distinto de 0:
 
 ```{python}
@@ -277,7 +279,7 @@ print(tabla_bow)
 
 Tomando en cuenta que la cantidad promedio de palabras por artículo en nuestro dataset, de únicamente los 3 medios de prensa con más publicaciones, es $424\ll 82287$, es comprensible suponer que ambas matrices son esparzas, ya que la mayoría de elemento serán entonces 0. Es aún más facil de ver si comparamos ahora con la cantidad de palabras en el artículo que cuenta con el mayor número de palabras, $12069 < 82287$, es decir que aún en la fila correspondiente a este artículo, la amplia mayoría de elementos serán 0.
 
-Si almacenáramos estas matrices en la forma clásica, habría que guardar $10262 \times 82287=844.429.194$ valores y $4398 \times 82287=361.898.226$ valores, respectivamente, lo cual ocuparía mucha memorí, por lo que utilizaremos el hecho de que ambas son matrices esparzas a favor para almacenarlas de manera más eficiente: utilizaremos la representación *sparce* de *scikit-learn*, la cual almacena solo las posiciones y valores de los elementos distintos de cero.
+Si almacenáramos estas matrices en la forma clásica, habría que guardar $10262 \times 82287=844.429.194$ valores y $4398 \times 82287=361.898.226$ valores, respectivamente, lo cual ocuparía mucha memoría, por lo que utilizaremos el hecho de que ambas son matrices esparzas a favor para almacenarlas de manera más eficiente: utilizaremos la representación *sparce* de *scikit-learn*, la cual almacena solo las posiciones y valores de los elementos distintos de cero.
 
 
 # 4. Representación TF-IDF
@@ -352,6 +354,7 @@ La mayoría de las palabras de ejemplo, donde el valor de representación no es 
 ## 5. Visualización PCA sobre TF-IDF
 Muestre en un mapa el conjunto de entrenamiento, utilizando las dos primeras componentes PCA sobre los vectores de TF-IDF.
 Analice los resultados y compare qué sucede si utiliza:
+
 - a) el filtrado de `stop_words` para idioma inglés;
 - b) el parámetro `use_idf=True`;
 - c) `ngram_range=(1,2)`.
@@ -363,21 +366,265 @@ Haga una visualización que permita entender cómo varía la varianza explicada 
 
 Discuta además si la separación observada puede deberse a diferencias de estilo editorial, a diferencias temáticas o a pistas explícitas del medio que no hayan sido removidas en la limpieza.
 
+# Respuesta
+
+Observación 1: la función _TfidfVectorizer_ usa por defecto _use_idf=True_, por lo que el ejemplo presentado en la tabla \ref{tab:ejemplo_tfidf} cuenta con el componente IDF en su represerntación. A coninuación mostraremos los resultados, tanto con el argumento _use_idf=False_, donde solo se aplica un TF normalizado, como con _use_idf=True_.
+
+Observación 2: Computacionalmente no es recomendable aplicar PCA, ya que la matriz resultante tiene dimensiones demasiado grandes y, para aplicar PCA, es necesario primero convertir la matriz esparza en una matriz densa. Por esto, en lugar de PCA, aplicaremos SVD. Esta segunda técnica no necesita de centrar la matriz, por lo que puede trabajar directamente con matrices esparzas.
+
+```{python}
+
+#use_idf=True
+
+#PCA
+# pca = PCA(n_components=2, random_state=33)
+# X_pca = pca.fit_transform(X_train_tfidf.toarray())
+
+# SVD
+svd = TruncatedSVD(
+    n_components=10,
+    random_state=33
+)
+
+X_svd = svd.fit_transform(X_train_tfidf)
+
+# X_svd.shape #(10262, 2)
+
+df_svd = pd.DataFrame({
+    "PC1": X_svd[:, 0],
+    "PC2": X_svd[:, 1],
+    "publication": y_train.values
+})
+```
+
 ```{python}
 
 # TODO: Aplique PCA con 2 componentes sobre X_train_tfidf y grafique los resultados,
 # coloreando los puntos según el medio de prensa.
 
+tfidf_idf_false = TfidfVectorizer(
+    use_idf=False
+)
+
+X_train_idf_false = tfidf_idf_false.fit_transform(X_train)
+
+#PCA
+# X_pca_idf_false = PCA(
+#     n_components=2,
+#     random_state=33
+# ).fit_transform(X_train_idf_false.toarray())
+
+# SVD
+svd_idf_false = TruncatedSVD(
+    n_components=10,
+    random_state=33
+)
+
+X_svd_idf_false=svd_idf_false.fit_transform(
+    X_train_idf_false
+)
+
+df_svd_idf_false = pd.DataFrame({
+    "PC1": X_svd_idf_false[:, 0],
+    "PC2": X_svd_idf_false[:, 1],
+    "publication": y_train.values
+})
+
+
 ```
+
+
+```{python}
+
+#stopwords
+stopwords = list(ENGLISH_STOP_WORDS)
+
+tfidf_stop = TfidfVectorizer(
+    stop_words=stopwords
+)
+
+X_train_stop = tfidf_stop.fit_transform(X_train)
+
+#PCA
+# X_pca_stop = PCA(
+#     n_components=2,
+#     random_state=33
+# ).fit_transform(X_train_tfidf_stop.toarray())
+
+#X_train_stop.shape #(10262, 2)
+
+# SVD
+svd_stop = TruncatedSVD(
+    n_components=10,
+    random_state=33
+)
+X_svd_stop = svd_stop.fit_transform(
+    X_train_stop
+)
+
+df_svd_stop = pd.DataFrame({
+    "PC1": X_svd_stop[:, 0],
+    "PC2": X_svd_stop[:, 1],
+    "publication": y_train.values
+})
+
+```
+
+
+```{python}
+#bi-grama
+
+tfidf_bigram = TfidfVectorizer(
+    ngram_range=(1, 2)
+)
+
+X_train_bigram = tfidf_bigram.fit_transform(X_train)
+
+
+# PCA
+# X_pca_bigram = PCA(
+#     n_components=2,
+#     random_state=42
+# ).fit_transform(X_train_tfidf_bigram.toarray())
+
+# SVD
+svd_bigram = TruncatedSVD(
+    n_components=10,
+    random_state=33
+)
+X_svd_bigram = svd_bigram.fit_transform(
+    X_train_bigram
+)
+
+df_svd_bigram = pd.DataFrame({
+    "PC1": X_svd_bigram[:, 0],
+    "PC2": X_svd_bigram[:, 1],
+    "publication": y_train.values
+})
+```
+
 
 ```{python}
 # TODO: Compare los resultados de PCA con distintas configuraciones del TfidfVectorizer:
 
+
+
+# gráfico
+fig, axs = plt.subplots(
+    2, 2,
+    figsize=(10, 8)
+)
+
+casos = [
+    ("TF-IDF", df_svd),
+    ("Stop words", df_svd_stop),
+    ("TF (sin IDF)", df_svd_idf_false),
+    ("Unigramas + Bigramas", df_svd_bigram)
+]
+
+for ax, (titulo, df_plot) in zip(axs.ravel(), casos):
+
+    for medio in sorted(df_plot["publication"].unique()):
+
+        subset = df_plot[
+            df_plot["publication"] == medio
+        ]
+
+        ax.scatter(
+            subset["PC1"],
+            subset["PC2"],
+            s=15,
+            alpha=0.15,
+            label=medio
+        )
+
+    ax.set_title(
+        titulo,
+        fontsize=9,
+        pad=2,
+        fontweight="normal"
+    )
+
+    ax.tick_params(
+        axis="both",
+        labelsize=7
+    )
+
+# Etiquetas globales
+fig.supxlabel(
+    "Componente 1",
+    fontsize=9,
+    y=0.06
+)
+
+fig.supylabel(
+    "Componente 2",
+    fontsize=9,
+    x=0.04
+)
+
+# Leyenda única
+handles, labels = axs[0, 0].get_legend_handles_labels()
+
+fig.legend(
+    handles,
+    labels,
+    loc="lower center",
+    ncol=3,
+    fontsize=8,
+    frameon=True,
+    bbox_to_anchor=(0.5, -0.01)
+)
+
+# Ajustar espacios
+plt.tight_layout(
+    rect=[0.05, 0.08, 1, 0.95]
+)
+
+plt.show()
 ```
 
 ```{python}
 # TODO: Genere una visualización que muestre cómo varía la varianza explicada
 # a medida que se agregan componentes PCA (por ejemplo, hasta 10 componentes).
+
+plt.figure(figsize=(8, 5))
+
+plt.plot(
+    range(1, 11),
+    np.cumsum(svd.explained_variance_ratio_),
+    marker="o",
+    label="TF-IDF"
+)
+
+plt.plot(
+    range(1, 11),
+    np.cumsum(svd_idf_false.explained_variance_ratio_),
+    marker="o",
+    label="TF (sin IDF)"
+)
+
+plt.plot(
+    range(1, 11),
+    np.cumsum(svd_stop.explained_variance_ratio_),
+    marker="o",
+    label="Stop words"
+)
+
+plt.plot(
+    range(1, 11),
+    np.cumsum(svd_bigram.explained_variance_ratio_),
+    marker="o",
+    label="Unigramas + Bigramas"
+)
+
+plt.xlabel("Número de componentes")
+plt.ylabel("Varianza explicada acumulada")
+plt.title("Varianza explicada acumulada por SVD")
+plt.grid(True)
+plt.legend()
+
+plt.show()
 
 ```
 
