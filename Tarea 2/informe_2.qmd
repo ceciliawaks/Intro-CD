@@ -19,12 +19,12 @@ execute:
 ```{r}
 library(reticulate)
 
-# use_python(
-#   "C:/Users/facur/anaconda3/envs/fertcast/python.exe",
-#   required = TRUE
-# )
+use_python(
+   "C:/Users/facur/anaconda3/envs/fertcast/python.exe",
+   required = TRUE
+ )
 
-Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
+#Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
 
 ```
 
@@ -45,6 +45,7 @@ from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_sc
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer, ENGLISH_STOP_WORDS
 from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.naive_bayes import MultinomialNB
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
@@ -74,11 +75,22 @@ text_columns = [
 df[text_columns] = df[text_columns].astype("string")
 ```
 
-# Parte 1: Dataset y representación numérica de texto
+# Introducción
 
-## 1. Preparación del dataset
+En este trabajo se busca construir un modelo de clasificación de texto capaz de predecir a qué medio de prensa pertenece un artículo periodístico a partir únicamente de su contenido textual. Para esto se utiliza un subconjunto del dataset *All the News 2.1 -- Component One*, que reúne artículos de distintos medios junto con los metadatos asociados a cada publicación. El interés no está tanto en alcanzar la mayor exactitud posible como en comprender el proceso de clasificación y poder interpretar sus resultados.
+
+El análisis exploratorio que se realizó previamente sobre estos mismos datos ya había dejado algunas señales útiles para esta etapa. Por un lado, la cantidad de artículos está fuertemente desbalanceada entre medios, con \texttt{Reuters} concentrando una porción muy superior al resto, algo que conviene tener presente tanto al entrenar los modelos como, sobre todo, al interpretar sus métricas. Por otro, se vio que los propios artículos suelen incluir pistas directas de su origen, como menciones al nombre del medio, direcciones web o firmas editoriales, que de no removerse podrían facilitar la tarea de forma artificial. Y aunque los medios comparten temáticas transversales, como la política estadounidense, mostraban perfiles de vocabulario diferenciados: \texttt{Reuters} y \texttt{CNBC} aparecían ligados a un lenguaje económico e internacional, mientras que \texttt{The New York Times} se inclinaba hacia la política y hacia temas más cercanos a la vida cotidiana y la cultura. Estas diferencias sugieren, ya de entrada, que habrá medios más fáciles de distinguir que otros.
+
+
+
+
+Para esta tarea primero se traducirá el texto a una representación numérica con la que un modelo pueda operar, explorando técnicas como *bag of words* y *TF-IDF*, y observando mediante una reducción de dimensionalidad hasta qué punto los medios resultan separables. Luego se entrena y evalua el rendimiento de un modelo *Multinomial Naive Bayes*, evaluando su desempeño con métricas de clasificación.
+
+# Dataset y representación numérica de texto
+
+## Preparación de los datos
+
 Se utilizará un conjunto de datos reducido de los **tres medios de prensa con mayor cantidad de artículos**.
-Se espera que utilice su propia versión de la función `clean_text()` de la Tarea 1.
 
 Particione los datos para generar un conjunto de test del 30% del total, utilizando muestreo estratificado.
 
@@ -368,9 +380,9 @@ Discuta además si la separación observada puede deberse a diferencias de estil
 
 # Respuesta
 
-Observación 1: la función _TfidfVectorizer_ usa por defecto _use_idf=True_, por lo que el ejemplo presentado en la tabla \ref{tab:ejemplo_tfidf} cuenta con el componente IDF en su represerntación. A coninuación mostraremos los resultados, tanto con el argumento _use_idf=False_, donde solo se aplica un TF normalizado, como con _use_idf=True_.
+Observación 1: la función _TfidfVectorizer_ usa por defecto _use_idf=True_, por lo que el ejemplo presentado en la tabla \ref{tab:ejemplo_tfidf} ya incorpora el componente IDF. A continuación comparamos el mapa que se obtiene con el TF-IDF base frente al que resulta de eliminar las _stop words_ del inglés, utilizando la misma lista que en la Tarea 1: las palabras vacías estándar más \texttt{s}, \texttt{u}, \texttt{say} y \texttt{said}.
 
-Observación 2: Computacionalmente no es recomendable aplicar PCA, ya que la matriz resultante tiene dimensiones demasiado grandes y, para aplicar PCA, es necesario primero convertir la matriz esparza en una matriz densa. Por esto, en lugar de PCA, aplicaremos SVD. Esta segunda técnica no necesita de centrar la matriz, por lo que puede trabajar directamente con matrices esparzas.
+Observación 2: Computacionalmente no es recomendable aplicar PCA, ya que la matriz resultante tiene dimensiones demasiado grandes y, para aplicar PCA, es necesario primero convertir la matriz esparza en una matriz densa. Por esto, en lugar de PCA, aplicaremos SVD. Esta segunda técnica no necesita centrar la matriz, por lo que puede trabajar directamente con matrices esparzas. Cabe notar que SVD equivale a PCA salvo por ese centrado.
 
 ```{python}
 
@@ -399,45 +411,8 @@ df_svd = pd.DataFrame({
 
 ```{python}
 
-# TODO: Aplique PCA con 2 componentes sobre X_train_tfidf y grafique los resultados,
-# coloreando los puntos según el medio de prensa.
-
-tfidf_idf_false = TfidfVectorizer(
-    use_idf=False
-)
-
-X_train_idf_false = tfidf_idf_false.fit_transform(X_train)
-
-#PCA
-# X_pca_idf_false = PCA(
-#     n_components=2,
-#     random_state=33
-# ).fit_transform(X_train_idf_false.toarray())
-
-# SVD
-svd_idf_false = TruncatedSVD(
-    n_components=10,
-    random_state=33
-)
-
-X_svd_idf_false=svd_idf_false.fit_transform(
-    X_train_idf_false
-)
-
-df_svd_idf_false = pd.DataFrame({
-    "PC1": X_svd_idf_false[:, 0],
-    "PC2": X_svd_idf_false[:, 1],
-    "publication": y_train.values
-})
-
-
-```
-
-
-```{python}
-
 #stopwords
-stopwords = list(ENGLISH_STOP_WORDS)
+stopwords = list(ENGLISH_STOP_WORDS) + ["s", "u", "say", "said"]
 
 tfidf_stop = TfidfVectorizer(
     stop_words=stopwords
@@ -472,54 +447,19 @@ df_svd_stop = pd.DataFrame({
 
 
 ```{python}
-#bi-grama
+#| label: fig-svd-comparacion
+#| fig-cap: "Proyección sobre las dos primeras componentes SVD del conjunto de entrenamiento: TF-IDF base frente a TF-IDF eliminando stop words."
+#| fig-align: center
+#| fig-pos: "H"
 
-tfidf_bigram = TfidfVectorizer(
-    ngram_range=(1, 2)
-)
-
-X_train_bigram = tfidf_bigram.fit_transform(X_train)
-
-
-# PCA
-# X_pca_bigram = PCA(
-#     n_components=2,
-#     random_state=42
-# ).fit_transform(X_train_tfidf_bigram.toarray())
-
-# SVD
-svd_bigram = TruncatedSVD(
-    n_components=10,
-    random_state=33
-)
-X_svd_bigram = svd_bigram.fit_transform(
-    X_train_bigram
-)
-
-df_svd_bigram = pd.DataFrame({
-    "PC1": X_svd_bigram[:, 0],
-    "PC2": X_svd_bigram[:, 1],
-    "publication": y_train.values
-})
-```
-
-
-```{python}
-# TODO: Compare los resultados de PCA con distintas configuraciones del TfidfVectorizer:
-
-
-
-# gráfico
 fig, axs = plt.subplots(
-    2, 2,
-    figsize=(10, 8)
+    1, 2,
+    figsize=(10, 4.5)
 )
 
 casos = [
     ("TF-IDF", df_svd),
-    ("Stop words", df_svd_stop),
-    ("TF (sin IDF)", df_svd_idf_false),
-    ("Unigramas + Bigramas", df_svd_bigram)
+    ("Stop words", df_svd_stop)
 ]
 
 for ax, (titulo, df_plot) in zip(axs.ravel(), casos):
@@ -540,31 +480,30 @@ for ax, (titulo, df_plot) in zip(axs.ravel(), casos):
 
     ax.set_title(
         titulo,
-        fontsize=9,
-        pad=2,
-        fontweight="normal"
+        fontsize=10,
+        pad=4
     )
 
     ax.tick_params(
         axis="both",
-        labelsize=7
+        labelsize=8
     )
 
 # Etiquetas globales
 fig.supxlabel(
     "Componente 1",
-    fontsize=9,
-    y=0.06
+    fontsize=10,
+    y=0.02
 )
 
 fig.supylabel(
     "Componente 2",
-    fontsize=9,
-    x=0.04
+    fontsize=10,
+    x=0.02
 )
 
 # Leyenda única
-handles, labels = axs[0, 0].get_legend_handles_labels()
+handles, labels = axs.ravel()[0].get_legend_handles_labels()
 
 fig.legend(
     handles,
@@ -573,20 +512,22 @@ fig.legend(
     ncol=3,
     fontsize=8,
     frameon=True,
-    bbox_to_anchor=(0.5, -0.01)
+    bbox_to_anchor=(0.5, -0.06)
 )
 
 # Ajustar espacios
 plt.tight_layout(
-    rect=[0.05, 0.08, 1, 0.95]
+    rect=[0.04, 0.08, 1, 0.96]
 )
 
 plt.show()
 ```
 
 ```{python}
-# TODO: Genere una visualización que muestre cómo varía la varianza explicada
-# a medida que se agregan componentes PCA (por ejemplo, hasta 10 componentes).
+#| label: fig-varianza-svd
+#| fig-cap: "Varianza explicada acumulada por las primeras diez componentes SVD."
+#| fig-align: center
+#| fig-pos: "H"
 
 plt.figure(figsize=(8, 5))
 
@@ -599,23 +540,9 @@ plt.plot(
 
 plt.plot(
     range(1, 11),
-    np.cumsum(svd_idf_false.explained_variance_ratio_),
-    marker="o",
-    label="TF (sin IDF)"
-)
-
-plt.plot(
-    range(1, 11),
     np.cumsum(svd_stop.explained_variance_ratio_),
     marker="o",
     label="Stop words"
-)
-
-plt.plot(
-    range(1, 11),
-    np.cumsum(svd_bigram.explained_variance_ratio_),
-    marker="o",
-    label="Unigramas + Bigramas"
 )
 
 plt.xlabel("Número de componentes")
@@ -625,8 +552,124 @@ plt.grid(True)
 plt.legend()
 
 plt.show()
-
 ```
+
+Las dos primeras componentes no separan de forma nítida a los medios, pero dejan ver cierta estructura. Para entender si esa estructura responde a diferencias temáticas, aprovechamos que el propio conjunto de datos ya trae un área temática etiquetada en la variable \texttt{section}. En el Cuadro \ref{tab:top-secciones} se listan las cinco secciones más frecuentes de cada medio, que reflejan con bastante claridad su perfil editorial: \texttt{Reuters} se concentra en secciones financieras y de mercados, \texttt{The New York Times} reparte su cobertura entre noticias, opinión, cultura y deportes, y \texttt{CNBC} mezcla negocios, tecnología y política.
+
+```{python}
+#| results: asis
+
+top_secciones = {}
+for medio in ["Reuters", "The New York Times", "CNBC"]:
+    vc = (
+        df_top_3.loc[df_top_3["publication"] == medio, "section"]
+        .value_counts(dropna=True)
+    )
+    total = vc.sum()
+    top_secciones[medio] = [
+        f"{nombre} ({100 * n / total:.1f}%)"
+        for nombre, n in vc.head(5).items()
+    ]
+
+tabla_sec = pd.DataFrame(top_secciones)
+tabla_sec.index = [1, 2, 3, 4, 5]
+
+latex_sec = tabla_sec.to_latex(
+    index=True,
+    escape=True,
+    caption="Cinco secciones más frecuentes en cada medio (porcentaje sobre los artículos con sección registrada).",
+    label="tab:top-secciones",
+    column_format="clll"
+)
+latex_sec = latex_sec.replace(
+    "\\begin{table}",
+    "\\begin{table}[H]\n\\centering\n\\scriptsize"
+)
+print(latex_sec)
+```
+
+En el caso de \texttt{CNBC}, la etiqueta más frecuente es \emph{Wires}, que agrupa despachos de agencia y no constituye una temática en sí, por lo que se omite del gráfico que sigue. A partir de ellas tomamos algunas secciones representativas y, sobre el mismo espacio SVD del TF-IDF con stop words, calculamos su centro de gravedad como la posición media de los artículos de entrenamiento que pertenecen a cada sección (Figura \ref{fig-centroides}).
+
+```{python}
+#| label: fig-centroides
+#| fig-cap: "Centros de gravedad de cada medio y de sus secciones más representativas, sobre las dos primeras componentes SVD del TF-IDF con stop words."
+#| fig-align: center
+#| fig-pos: "H"
+
+df_svd_stop["section"] = df_top_3.loc[X_train.index, "section"].values
+
+colores = {
+    "Reuters": "tab:orange",
+    "CNBC": "tab:blue",
+    "The New York Times": "tab:green"
+}
+
+secciones = ["Markets", "World News", "opinion", "arts", "sports"]
+
+med_cent = df_svd_stop.groupby("publication")[["PC1", "PC2"]].mean()
+
+sec_cent = {
+    s: df_svd_stop.loc[df_svd_stop["section"] == s, ["PC1", "PC2"]].mean()
+    for s in secciones
+}
+
+med_off = {
+    "Reuters": (0, 13, "center"),
+    "CNBC": (13, 2, "left"),
+    "The New York Times": (0, -16, "center")
+}
+sec_off = {
+    "Markets": (8, 4, "left"),
+    "World News": (8, 5, "left"),
+    "opinion": (8, -10, "left"),
+    "arts": (-8, -12, "right"),
+    "sports": (-8, 10, "right")
+}
+
+fig, ax = plt.subplots(figsize=(9, 6.5))
+
+for medio in colores:
+    sub = df_svd_stop[df_svd_stop["publication"] == medio]
+    ax.scatter(sub["PC1"], sub["PC2"], s=8, alpha=0.05, color=colores[medio])
+
+for medio in colores:
+    ax.scatter(
+        med_cent.loc[medio, "PC1"], med_cent.loc[medio, "PC2"],
+        s=260, marker="o", color=colores[medio],
+        edgecolor="black", linewidth=1.5, zorder=5
+    )
+    dx, dy, ha = med_off[medio]
+    ax.annotate(
+        medio, (med_cent.loc[medio, "PC1"], med_cent.loc[medio, "PC2"]),
+        fontsize=12, fontweight="bold", zorder=6,
+        xytext=(dx, dy), textcoords="offset points", ha=ha
+    )
+
+for s, c in sec_cent.items():
+    ax.scatter(
+        c["PC1"], c["PC2"], s=90, marker="s",
+        color="gray", edgecolor="black", linewidth=0.6, zorder=7
+    )
+    dx, dy, ha = sec_off[s]
+    ax.annotate(
+        s, (c["PC1"], c["PC2"]),
+        fontsize=9, color="dimgray", zorder=8,
+        xytext=(dx, dy), textcoords="offset points", ha=ha
+    )
+
+ax.axhline(0, ls="--", lw=0.6, color="gray", alpha=0.5)
+ax.set_xlabel("Componente 1")
+ax.set_ylabel("Componente 2")
+ax.grid(alpha=0.2)
+plt.tight_layout()
+plt.show()
+```
+
+La figura confirma la lectura temática. La sección de mercados (*Markets*) se ubica en la franja de negocios que comparten \texttt{Reuters} y \texttt{CNBC}, mientras que en el extremo opuesto se agrupan las secciones más editoriales y culturales de \texttt{The New York Times} (*opinion*, *arts*, *sports*), que arrastran su centro de gravedad hacia abajo.
+
+La sección *World News*, en cambio, de contenido más general, no se acerca a ningún medio en particular sino que cae en la zona central compartida. Este contraste es el dato más interesante: las secciones de noticia general gravitan hacia el centro, mientras que las que definen la identidad de cada medio (los mercados para \texttt{Reuters} y \texttt{CNBC}, la cobertura cultural y de opinión para \texttt{The New York Times}) se alejan hacia su propio extremo. Esto explica por qué los medios se solapan tanto en el mapa: comparten la cobertura de temas generales y se diferencian sobre todo en sus secciones más específicas.
+
+En conjunto, la posición de cada medio queda bien explicada por la mezcla de secciones que publica, lo que indica que la separación observada responde en buena medida a diferencias temáticas y de cobertura editorial. Aunque parte de esa diferencia podría reflejar además un estilo de redacción propio de cada medio, el hecho de que las secciones se ordenen según su temática sugiere que el factor dominante es el contenido. No puede descartarse, de todos modos, el efecto de pistas explícitas del medio, ya que la limpieza no elimina menciones como el propio nombre de la publicación (de hecho, \texttt{reuters} aparecía como término en el ejemplo de TF-IDF). Por último, conviene recordar que estas dos componentes capturan apenas una fracción de la varianza total (Figura \ref{fig-varianza-svd}); la separación plena de los medios no se alcanza en el plano, sino al incorporar más dimensiones.
 
 # Parte 2: Entrenamiento y Evaluación de Modelos
 
@@ -642,9 +685,63 @@ Considere qué sucedería con esta métrica si el desbalance de datos fuera aún
 **Sugerencia**: utilice el método `from_predictions` de `ConfusionMatrixDisplay` para realizar la matriz.
 
 ```{python}
+# Entrenamiento del modelo y predicción sobre el conjunto de test
+mnb = MultinomialNB()
+mnb.fit(X_train_tfidf, y_train)
 
-# TODO: Entrene Multinomial Naive Bayes sobre X_train_tfidf
+y_pred_mnb = mnb.predict(X_test_tfidf)
 
+acc_mnb = accuracy_score(y_test, y_pred_mnb)
+print(f"Accuracy en test: {acc_mnb:.3f}")
+```
+
+```{python}
+#| label: fig-cm-mnb
+#| fig-cap: "Matriz de confusión del modelo Multinomial Naive Bayes sobre el conjunto de test."
+#| fig-align: center
+#| fig-pos: "H"
+
+fig, ax = plt.subplots(figsize=(5.5, 4.5))
+ConfusionMatrixDisplay.from_predictions(
+    y_test,
+    y_pred_mnb,
+    ax=ax,
+    cmap="Blues",
+    colorbar=False,
+    xticks_rotation=45
+)
+ax.set_xlabel("Predicción")
+ax.set_ylabel("Medio real")
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| results: asis
+
+reporte_mnb = classification_report(
+    y_test,
+    y_pred_mnb,
+    output_dict=True
+)
+tabla_mnb = (
+    pd.DataFrame(reporte_mnb).T
+    .loc[list(mnb.classes_), ["precision", "recall", "f1-score"]]
+    .round(3)
+)
+
+latex_mnb = tabla_mnb.to_latex(
+    index=True,
+    escape=True,
+    caption="Precision, recall y F1 por medio (Multinomial Naive Bayes).",
+    label="tab:metricas-mnb",
+    column_format="lccc"
+)
+latex_mnb = latex_mnb.replace(
+    "\\begin{table}",
+    "\\begin{table}[H]\n\\centering"
+)
+print(latex_mnb)
 ```
 
 ```{python}
@@ -674,9 +771,65 @@ Discuta las limitaciones de utilizar un modelo basado en *bag of words* o TF-IDF
 Evalúe al menos un modelo más (dentro de scikit-learn) aparte de *Multinomial Naive Bayes* para clasificar el texto utilizando las mismas *features* de texto.
 Explique brevemente cómo funciona y compare los resultados con el anterior.
 
-```{pyhton}
-# TODO: Entrene al menos un modelo alternativo de scikit-learn
+```{python}
+# Regresión logística multinomial con regularización L2 (por defecto en sklearn),
+# entrenada sobre las mismas features TF-IDF
+logreg = LogisticRegression(max_iter=1000, C=1.0)
+logreg.fit(X_train_tfidf, y_train)
 
+y_pred_lr = logreg.predict(X_test_tfidf)
+
+acc_lr = accuracy_score(y_test, y_pred_lr)
+print(f"Accuracy en test: {acc_lr:.3f}")
+```
+
+```{python}
+#| label: fig-cm-logreg
+#| fig-cap: "Matriz de confusión de la regresión logística multinomial sobre el conjunto de test."
+#| fig-align: center
+#| fig-pos: "H"
+
+fig, ax = plt.subplots(figsize=(5.5, 4.5))
+ConfusionMatrixDisplay.from_predictions(
+    y_test,
+    y_pred_lr,
+    ax=ax,
+    cmap="Blues",
+    colorbar=False,
+    xticks_rotation=45
+)
+ax.set_xlabel("Predicción")
+ax.set_ylabel("Medio real")
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| results: asis
+
+reporte_lr = classification_report(
+    y_test,
+    y_pred_lr,
+    output_dict=True
+)
+tabla_lr = (
+    pd.DataFrame(reporte_lr).T
+    .loc[list(logreg.classes_), ["precision", "recall", "f1-score"]]
+    .round(3)
+)
+
+latex_lr = tabla_lr.to_latex(
+    index=True,
+    escape=True,
+    caption="Precision, recall y F1 por medio (regresión logística multinomial).",
+    label="tab:metricas-logreg",
+    column_format="lccc"
+)
+latex_lr = latex_lr.replace(
+    "\\begin{table}",
+    "\\begin{table}[H]\n\\centering"
+)
+print(latex_lr)
 ```
 
 ## 5. Cambio de medio de prensa
