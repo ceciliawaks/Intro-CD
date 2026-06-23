@@ -1,7 +1,6 @@
 ---
 title: "Entrega 2 - Introducción a la Ciencia de Datos"
 author: "Grupo 8: Facundo Morini, Cecilia Waksman"
-date: today
 lang: es
 format:
   pdf:
@@ -10,6 +9,9 @@ format:
       text: |
         \usepackage{booktabs}
         \usepackage{float}
+        \usepackage{titling}
+        \setlength{\droptitle}{-2.5cm}
+        \posttitle{\par\end{center}\vspace{-0.8em}}
 execute:
     echo: false
     warning: false
@@ -39,6 +41,9 @@ import seaborn as sns
 import re
 import string
 
+import prince
+from adjustText import adjust_text
+
 from datasets import load_dataset
 
 from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
@@ -46,6 +51,7 @@ from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer, EN
 from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.linear_model import LogisticRegression
+from sklearn.multiclass import OneVsRestClassifier
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
@@ -55,7 +61,7 @@ from sklearn.metrics import (
 ```
 
 ```{python}
-ds = load_dataset("tomas-gr/all-the-news-2-1-Component-one-sampled", split="train", cache_dir="../data")
+ds = load_dataset("tomas-gr/all-the-news-2-1-Component-one-sampled", split="train", cache_dir="data")
 df = ds.to_pandas()
 
 df["date"] = pd.to_datetime(df["date"], format="mixed")
@@ -75,67 +81,213 @@ text_columns = [
 df[text_columns] = df[text_columns].astype("string")
 ```
 
-# Introducción
-
-En este trabajo se busca construir un modelo de clasificación de texto capaz de predecir a qué medio de prensa pertenece un artículo periodístico a partir únicamente de su contenido textual. Para esto se utiliza un subconjunto del dataset *All the News 2.1 -- Component One*, que reúne artículos de distintos medios junto con los metadatos asociados a cada publicación. El interés no está tanto en alcanzar la mayor exactitud posible como en comprender el proceso de clasificación y poder interpretar sus resultados.
-
-El análisis exploratorio que se realizó previamente sobre estos mismos datos ya había dejado algunas señales útiles para esta etapa. Por un lado, la cantidad de artículos está fuertemente desbalanceada entre medios, con \texttt{Reuters} concentrando una porción muy superior al resto, algo que conviene tener presente tanto al entrenar los modelos como, sobre todo, al interpretar sus métricas. Por otro, se vio que los propios artículos suelen incluir pistas directas de su origen, como menciones al nombre del medio, direcciones web o firmas editoriales, que de no removerse podrían facilitar la tarea de forma artificial. Y aunque los medios comparten temáticas transversales, como la política estadounidense, mostraban perfiles de vocabulario diferenciados: \texttt{Reuters} y \texttt{CNBC} aparecían ligados a un lenguaje económico e internacional, mientras que \texttt{The New York Times} se inclinaba hacia la política y hacia temas más cercanos a la vida cotidiana y la cultura. Estas diferencias sugieren, ya de entrada, que habrá medios más fáciles de distinguir que otros.
-
-
-
-
-Para esta tarea primero se traducirá el texto a una representación numérica con la que un modelo pueda operar, explorando técnicas como *bag of words* y *TF-IDF*, y observando mediante una reducción de dimensionalidad hasta qué punto los medios resultan separables. Luego se entrena y evalua el rendimiento de un modelo *Multinomial Naive Bayes*, evaluando su desempeño con métricas de clasificación.
-
-# Dataset y representación numérica de texto
-
-## Preparación de los datos
-
-Se utilizará un conjunto de datos reducido de los **tres medios de prensa con mayor cantidad de artículos**.
-
-Particione los datos para generar un conjunto de test del 30% del total, utilizando muestreo estratificado.
-
-**Sugerencia**: utilice el parámetro `stratify` de la función `train_test_split` de scikit-learn y fije también el valor de `random_state` para obtener resultados reproducibles.
-
 ```{python}
+#| include: false
+# Pipeline reutilizado de la Tarea 1 para reconstruir las dos figuras
+# introductorias (top de medios y análisis de correspondencias).
+
 
 def clean_text(df, column_name):
 
     # Eliminar encabezado hasta el primer salto de línea
-    result = df[column_name].str.replace(
-        r"^[^\n]*\n",
-        "",
-        regex=True
-    )
+    result = df[column_name].str.replace(r"^[^\n]*\n", "", regex=True)
 
     # Minúsculas
     result = result.str.lower()
 
     # Reemplazar puntuación y saltos de línea por espacios
     punctuation = re.escape(string.punctuation + "—–¿¡«»")
-    result = result.str.replace(
-        f"[{punctuation}\\n]",
-        " ",
-        regex=True
-    )
+    result = result.str.replace(f"[{punctuation}\\n]", " ", regex=True)
 
     # Eliminar palabras que contengan caracteres no permitidos
     result = result.str.replace(
-        r"\b\S*[^a-zA-Z\sáéíóúüñ]\S*\b",
-        "",
-        regex=True
+        r"\b\S*[^a-zA-Z\sáéíóúüñ]\S*\b", "", regex=True
     )
 
     # Eliminar espacios múltiples
-    result = result.str.replace(
-        r"\s+",
-        " ",
-        regex=True
-    ).str.strip()
+    result = result.str.replace(r"\s+", " ", regex=True).str.strip()
 
     return result
+
+
+# Cinco medios con mayor cantidad de artículos (los usados en la Tarea 1)
+top_5_publications = df["publication"].value_counts().head(5).index
+df_top_5 = df[df["publication"].isin(top_5_publications)].copy()
+
+df_top_5["CleanText"] = clean_text(df_top_5, "article")
+
+stopwords = list(ENGLISH_STOP_WORDS) + ["s", "u", "say", "said"]
+df_top_5["CleanText_no_stop_words"] = (
+    df_top_5["CleanText"]
+    .str.replace(r"\b(" + "|".join(stopwords) + r")\b", "", regex=True)
+    .str.replace(r"\s+", " ", regex=True)
+    .str.strip()
+)
+
+# Tabla medios x palabras para el análisis de correspondencias
+rows = []
+top_n = 100
+for publication, group in df_top_5.groupby("publication"):
+    texts = group["CleanText_no_stop_words"].dropna().astype(str);
+    vectorizer = CountVectorizer();
+    word_matrix = vectorizer.fit_transform(texts);
+    word_counts = word_matrix.sum(axis=0).A1
+    words = vectorizer.get_feature_names_out();
+    freq_df = pd.DataFrame(
+        {"publication": publication, "word": words, "count": word_counts}
+    );
+    rows.append(freq_df.sort_values("count", ascending=False).head(top_n));
+
+top_words_df = pd.concat(rows, ignore_index=True);
+
+other_stopwords = {
+    "new", "times", "ms",
+    "cnbc", "reuters", "nyt", "newyorktimes", "york",
+}
+stopwords_ca = set(stopwords).union(other_stopwords);
+df_ca = top_words_df[~top_words_df["word"].isin(stopwords_ca)].copy();
+
+top_100_words = (
+    df_ca.groupby("word")["count"]
+    .sum()
+    .sort_values(ascending=False)
+    .head(100)
+    .index
+);
+df_ca = df_ca[df_ca["word"].isin(top_100_words)];
+
+tabla_ca = df_ca.pivot_table(
+    index="publication",
+    columns="word",
+    values="count",
+    aggfunc="sum",
+    fill_value=0,
+);
+```
+
+\vspace{-1.25cm} En este trabajo se busca construir un modelo de clasificación de texto capaz de predecir a qué medio de prensa pertenece un artículo periodístico a partir únicamente de su contenido textual. Para esto se utiliza un subconjunto del dataset *All the News 2.1 -- Component One*, que reúne artículos de distintos medios junto con los metadatos asociados a cada publicación. 
+
+El análisis exploratorio que se realizó previamente sobre estos mismos datos ya había dejado algunas señales útiles para esta etapa. La primera es el fuerte desbalance en la cantidad de artículos entre medios (Figura \ref{fig-top-medios}): \texttt{Reuters} concentra una porción muy superior al resto, algo que conviene tener presente tanto al entrenar los modelos como, sobre todo, al interpretar sus métricas. La segunda es que los propios artículos suelen incluir pistas directas de su origen, como menciones al nombre del medio, direcciones web o firmas editoriales, que de no removerse podrían facilitar la tarea de forma artificial. La tercera es que, aunque los medios comparten temáticas transversales como la política estadounidense, mostraban perfiles de vocabulario diferenciados. Esto último quedaba resumido en el análisis de correspondencias entre medios y términos frecuentes (Figura \ref{fig-ca}): \texttt{Reuters} y \texttt{CNBC} aparecían próximos entre sí y ligados a un lenguaje económico e internacional, mientras que \texttt{The New York Times} se inclinaba hacia la política y hacia temas más cercanos a la vida cotidiana y la cultura. Estas diferencias sugieren, ya de entrada, que habrá medios más fáciles de distinguir que otros.
+
+::: {layout-ncol=2}
+```{python}
+#| label: fig-top-medios
+#| fig-cap: "Diez medios con mayor cantidad de artículos en la base."
+#| fig-align: center
+#| fig-pos: "H"
+
+conteo_medios = df["publication"].dropna().value_counts();
+top_10_medios = conteo_medios.head(10);
+
+fig, ax = plt.subplots(figsize=(7, 5));
+top_10_medios.sort_values().plot(kind="barh", ax=ax);
+ax.set_xlabel("Cantidad de artículos");
+ax.set_ylabel("Medio de prensa");
+ax.set_title("Top 10 medios con más artículos");
+ax.set_xlim(0, 10500);
+
+for i, value in enumerate(top_10_medios.sort_values()):
+    ax.text(value, i, f" {value}", va="center", fontsize=9);
+
+ax.grid(axis="x", alpha=0.3);
+plt.tight_layout();
+plt.show();
 ```
 
 ```{python}
+#| label: fig-ca
+#| fig-cap: "Análisis de correspondencias entre los cinco medios principales y las palabras más frecuentes."
+#| fig-align: center
+#| fig-pos: "H"
+
+ca = prince.CA(n_components=2, n_iter=100, random_state=123);
+ca = ca.fit(tabla_ca);
+
+row_coords = ca.row_coordinates(tabla_ca);
+col_coords = ca.column_coordinates(tabla_ca);
+
+palabras = [
+    "democrats", "senate", "capitol", "dc", "washington", "campaign",
+    "house", "trump", "market", "markets", "financial", "bank",
+    "billion", "shares", "investors", "oil", "economy", "trade",
+    "family", "life", "like", "work", "american", "political", "white", "mr",
+];
+palabras_mostrar = [p for p in palabras if p in col_coords.index];
+palabras_no_mostrar = [p for p in col_coords.index if p not in palabras];
+
+fig, ax = plt.subplots(figsize=(8, 7));
+ax.scatter(
+    col_coords.loc[palabras_no_mostrar, 0],
+    col_coords.loc[palabras_no_mostrar, 1],
+    color="tab:blue", alpha=0.30, s=25,
+);
+ax.scatter(
+    col_coords.loc[palabras_mostrar, 0],
+    col_coords.loc[palabras_mostrar, 1],
+    color="tab:orange", alpha=0.9, s=55,
+);
+
+texts = [
+    ax.text(
+        col_coords.loc[p, 0], col_coords.loc[p, 1], p,
+        fontsize=11, color="tab:orange",
+    )
+    for p in palabras_mostrar
+];
+
+ax.scatter(row_coords[0], row_coords[1], color="black", s=90, label="Medios");
+
+offset_medios = {
+    "The New York Times": (0.05, 0.06),
+    "People": (-0.06, -0.08),
+    "CNBC": (0.02, 0.03),
+    "Reuters": (0.02, -0.06),
+    "The Hill": (0.02, 0.03),
+}
+for medio in row_coords.index:
+    dx, dy = offset_medios.get(medio, (0.02, 0.02));
+    ax.text(
+        row_coords.loc[medio, 0] + dx,
+        row_coords.loc[medio, 1] + dy,
+        medio, fontsize=12, fontweight="bold", color="black",
+        ha="right" if dx < 0 else "left", va="center",
+    );
+
+import io, contextlib
+
+with contextlib.redirect_stdout(io.StringIO()):
+    adjust_text(
+        texts, ax=ax,
+        force_text=(0.05, 0.08), force_static=(0.05, 0.08),
+        force_pull=(0.01, 0.02), max_move=(8, 8),
+        expand=(1.05, 1.10), ensure_inside_axes=True,
+        arrowprops=dict(arrowstyle="-", lw=0.4, alpha=0.4, color="gray"),
+    );
+
+ax.axhline(0, linestyle="--", linewidth=0.8);
+ax.axvline(0, linestyle="--", linewidth=0.8);
+ax.set_xlabel("Dimensión 1");
+ax.set_ylabel("Dimensión 2");
+ax.set_title("Análisis de correspondencias: medios y términos frecuentes");
+ax.legend();
+ax.grid(alpha=0.3);
+plt.tight_layout();
+plt.show();
+```
+:::
+
+Para esta tarea primero se traducirá el texto a una representación numérica con la que un modelo pueda operar, explorando técnicas como *bag of words* y *TF-IDF*, y observando mediante una reducción de dimensionalidad hasta qué punto los medios resultan separables. Luego se entrena y evalúa el rendimiento de modelos como *Multinomial Naive Bayes*, midiendo su desempeño con métricas de clasificación.
+
+# Dataset y representación numérica de texto
+
+## 1. Preparación de los datos
+
+Para esta tarea el análisis se restringe a los tres medios con mayor cantidad de artículos de la base, ya identificados: \texttt{Reuters}, \texttt{The New York Times} y \texttt{CNBC} (Figura \ref{fig-top-medios}). Una vez descartados los artículos sin cuerpo de texto, estos tres medios reúnen 14.660 artículos, sobre los que se construye el conjunto de trabajo.
+
+Sobre el cuerpo de cada artículo (variable \texttt{article}) se aplica una misma función, de modo de homogeneizar el texto antes de convertirlo en una representación numérica. Esta función elimina el encabezado que precede al primer salto de línea, convierte el texto a minúsculas, reemplaza los signos de puntuación y los saltos de línea por espacios, descarta las palabras que contienen caracteres no alfabéticos (restos de enlaces, números o códigos) y, finalmente, colapsa los espacios múltiples en uno solo.
+
+```{python}
+# La función clean_text fue definida en el bloque de preparación inicial.
 
 top_3_publications = df["publication"].value_counts().head(3).reset_index()
 top_3_publications.columns = [
@@ -155,8 +307,10 @@ df_top_3 = df_top_3.dropna(
 
 ```
 
+A partir de este conjunto se separa un 30\% de los artículos para conformar el conjunto de test, reservando el 70\% restante para el entrenamiento. Dado el fuerte desbalance entre medios: \texttt{Reuters} concentra cerca del 63\% de los artículos, frente a un 19\% de \texttt{The New York Times} y un 18\% de \texttt{CNBC}, la partición se realiza mediante **muestreo estratificado**. De esta forma se garantiza que cada medio conserve aproximadamente la misma proporción en ambos subconjuntos, evitando que, por azar, alguno de los medios minoritarios quede sub o sobre-representado en el conjunto de test. Como resultado, el conjunto de entrenamiento queda conformado por 10.262 artículos y el de test por 4.398.
+
 ```{python}
-# TODO: Particione los datos en train y test (30% test), con muestreo estratificado
+# Partición train/test (30% test) con muestreo estratificado por medio
 X = df_top_3["CleanText"]
 y = df_top_3["publication"]
 
@@ -168,64 +322,61 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_
 
 ```
 
-## 2. Verificación del balance de clases
+Para verificar que la estratificación efectivamente preservó el balance original, en la Figura \ref{fig-balance-clases} se compara la proporción de artículos de cada medio en el conjunto total y en los conjuntos de entrenamiento y test.
 
 ```{python}
-# TODO: Genere una visualización que muestre la proporción de artículos de cada medio
-# en los conjuntos de train y test.
+#| label: fig-balance-clases
+#| fig-cap: "Proporción de artículos de cada medio en el conjunto total, de entrenamiento y de test."
+#| fig-align: center
+#| fig-pos: "H"
 
-dist_total = y.value_counts(normalize=True);
-dist_train = y_train.value_counts(normalize=True);
-dist_test = y_test.value_counts(normalize=True);
+orden_medios = y.value_counts().index
 
 dist_df = pd.concat(
-    [dist_total, dist_train, dist_test],
-    axis=1
-);
-dist_df.columns = ["Total", "Train", "Test"];
+    [
+        y.value_counts(normalize=True),
+        y_train.value_counts(normalize=True),
+        y_test.value_counts(normalize=True),
+    ],
+    axis=1,
+)
+dist_df.columns = ["Total", "Train", "Test"]
+dist_df = dist_df.loc[orden_medios] * 100
 
-#print(dist_df)
+fig, ax = plt.subplots(figsize=(9, 5))
 dist_df.plot(
     kind="bar",
-    figsize=(8, 5)
-);
+    ax=ax,
+    width=0.8,
+    color=["#4c72b0", "#dd8452", "#55a868"],
+)
 
-plt.ylabel("Proporción");
-plt.xlabel("Medio de prensa");
-plt.title("Balance de clases");
-plt.xticks(rotation=45);
-plt.legend();
-plt.tight_layout();
+ax.set_xlabel("Medio de prensa", fontsize=12)
+ax.set_ylabel("Porcentaje de artículos", fontsize=12)
+ax.set_title("Balance de clases en train y test", fontsize=14, pad=12)
+ax.set_ylim(0, dist_df.values.max() * 1.18)
+ax.tick_params(axis="x", labelrotation=0, labelsize=11)
+ax.grid(axis="y", alpha=0.3)
+ax.legend(title="Conjunto", fontsize=10, title_fontsize=11)
+
+for contenedor in ax.containers:
+    ax.bar_label(contenedor, fmt="%.1f%%", padding=2, fontsize=8)
+
+plt.tight_layout()
 plt.show()
-
 ```
 
-## 3. Representación Bag of Words
-Transforme el texto del conjunto de entrenamiento a una representación numérica (features) de conteo de palabras (*bag of words*).
-Explique brevemente cómo funciona esta técnica y muestre un ejemplo.
-En particular, explique el tamaño de la matriz resultante y la razón por la que es una matriz *sparse*.
+Las proporciones resultan prácticamente idénticas en los tres conjuntos: las diferencias entre train y test no superan la centésima de punto porcentual para ningún medio. De todas formas, la figura vuelve a dejar en evidencia el marcado desbalance entre clases, con \texttt{Reuters} representando casi dos tercios del total. Este desbalance no se corrige, sino que se mantiene de forma deliberada para trabajar sobre los datos tal como se presentan, pero conviene tenerlo presente de cara a la evaluación de los modelos, ya que condiciona la interpretación de métricas como la \textit{accuracy}, según se discutirá posteriormente.
 
-**Sugerencia**: puede ser útil imaginar qué sucedería con la memoria RAM requerida si no estuviéramos trabajando con un conjunto de datos reducido.
+## 2. Representación Bag of Words
 
-## Respuesta
+La técnica de *bag of words* (BOW) traduce cada artículo a un vector de conteos de palabras. Concretamente, se construye una matriz en la que cada fila corresponde a un artículo y cada columna a una de las palabras distintas presentes en el conjunto de entrenamiento; el valor de cada celda es la cantidad de veces que esa palabra aparece en ese artículo. El nombre de la técnica refleja que se descarta el orden de las palabras: solo importa cuántas veces aparece cada una, y no su posición ni el contexto en que se encuentra.
 
 ```{python}
-
-# TODO: Transforme el texto de entrenamiento a una representación Bag of Words
-
-# Muestre el tamaño de la matriz resultante
-
-# Muestre un ejemplo: las primeras palabras del vocabulario y sus conteos en un documento
-
 count_vect = CountVectorizer()
 X_train_bow = count_vect.fit_transform(X_train)
-X_test_bow = count_vect.transform(X_test)
 
-#X_train_bow.shape #(10262, 82287)
-#X_test_bow.shape #(4398, 82287)
-
-#print(list(count_vect.vocabulary_.keys())[:20])
-
+# X_train_bow.shape  # (10262, 82287)
 ```
 
 ```{python}
@@ -250,13 +401,9 @@ X_test_bow = count_vect.transform(X_test)
 ```
 
 
-El funcionamiento de la técnica BOW se basa en generar una matriz donde cada fila representa, en este caso, un artículo y cada columna una palabra distinta que aparezca en el conjunto de todos los artículos del dataset. Los elementos de la matriz son el conteo de la respectiva palabra en el correspondiente artículo.
+Aplicada sobre el conjunto de entrenamiento, esta transformación produce una matriz de dimensiones $(10262, 82287)$: 10.262 artículos por las 82.287 palabras distintas que conforman el vocabulario.
 
-Como tenemos un set de entrenamiento y otro de testeo, tendremos 2 matrices. En ambos casos las columas representan las distintas palabras que aparecen en los artículos del set de entrenamiento. La matriz generada para el set de entrenamiento es de dimensiones $(10262, 82287)$ y la generada para el set de testeo de $(4398, 82287)$.
-
-**Si no es necesario para la parte 2 procesar el set de testeo, borrar esto del texto.**
-
-Veamos como ejemplo los primeros 5 artículos de la matriz correspondiente al set de entrenamiento. Elegimos las palabras de forma que al menos un elemento sea distinto de 0:
+A modo de ejemplo, en el Cuadro \ref{tab:ejemplo_bow} se muestran los conteos de seis palabras del primer artículo, para los cinco primeros artículos del conjunto de entrenamiento. Se eligieron columnas con al menos un valor distinto de cero.
 
 ```{python}
 #| results: asis
@@ -289,51 +436,35 @@ print(tabla_bow)
 ```
 
 
-Tomando en cuenta que la cantidad promedio de palabras por artículo en nuestro dataset, de únicamente los 3 medios de prensa con más publicaciones, es $424\ll 82287$, es comprensible suponer que ambas matrices son esparzas, ya que la mayoría de elemento serán entonces 0. Es aún más facil de ver si comparamos ahora con la cantidad de palabras en el artículo que cuenta con el mayor número de palabras, $12069 < 82287$, es decir que aún en la fila correspondiente a este artículo, la amplia mayoría de elementos serán 0.
+El ejemplo ya anticipa una característica central de esta representación: la enorme mayoría de las celdas valen cero. Cada artículo utiliza apenas una pequeña fracción del vocabulario total; en este subconjunto, el promedio de palabras por artículo es de aproximadamente $424 \ll 82287$, muy por debajo del número de columnas. Incluso el artículo más extenso, con $12069 < 82287$ palabras, está lejos de cubrir el vocabulario completo, de modo que la fila que le corresponde sigue estando dominada por ceros. Por este motivo se dice que la matriz es dispersa.
 
-Si almacenáramos estas matrices en la forma clásica, habría que guardar $10262 \times 82287=844.429.194$ valores y $4398 \times 82287=361.898.226$ valores, respectivamente, lo cual ocuparía mucha memoría, por lo que utilizaremos el hecho de que ambas son matrices esparzas a favor para almacenarlas de manera más eficiente: utilizaremos la representación *sparce* de *scikit-learn*, la cual almacena solo las posiciones y valores de los elementos distintos de cero.
+Por último, vale señalar que esta representación es generalizable: en lugar de contar palabras sueltas, puede contarse la frecuencia de cada secuencia de $n$ palabras consecutivas —un **n-grama**, es decir, una secuencia de $n$ elementos contiguos—, en lo que se conoce como *bag of n-grams*. Vista así, BOW no es más que el caso particular con $n=1$.
 
+## 3. Representación TF-IDF
 
-# 4. Representación TF-IDF
-Explique brevemente qué es un **n-grama**.
-Obtenga la representación numérica *Term Frequency - Inverse Document Frequency* (TF-IDF).
-Explique brevemente en qué consiste esta transformación adicional.
+La representación *Term Frequency – Inverse Document Frequency* (TF-IDF) aborda una limitación de los conteos absolutos de BOW: dependen del largo del texto, ya que un artículo más extenso tenderá a repetir más veces cada palabra. El primer componente, *Term Frequency* (TF), corrige esto reemplazando el conteo por una frecuencia relativa al largo del texto:
 
-# Respuesta
+$$TF_{t,p}=\frac{\text{conteo de la palabra } p \text{ en el texto } t}{\text{conteo total de palabras en el texto } t}$$
 
-Un **n-grama** consiste en una secuencia de n elementos contiguos. En nuestro caso, se podría usar como alternativa a la representación BOW, tomando, en lugar de todas las palabras simples, todas las secuencias  de largo n de palabras de los artículos, con n a determinar. A este tipo de representaciones se las conoce como **Bag-of-ngrams**. Se podría decir que la representación BOW es solo un caso partícular de esta donde $n=1$.
+El segundo componente, *Inverse Document Frequency* (IDF), pondera cada palabra según qué tan extendida está en el conjunto de textos. Se define como el logaritmo del cociente entre la cantidad total de textos y la cantidad de textos que contienen la palabra:
 
-La representación TF-IDF ataca un problema presente en la representación BOW: los conteos absolutos se ven afectados por el largo del texto. En general se espera que en promedio textos más largos presenten más veces cada palabra. El componente TF de esta nueva representación se encarga de devolver la frecuencia relativa de cada palabra por texto, es decir que:
+$$IDF_{p}=\log\!\left(\frac{\text{cantidad total de textos}}{\text{cantidad de textos que contienen la palabra } p}\right)$$
 
-$$TF_{t,p}=\frac{\text{conteo de la palabra p en el texto t}}{\text{conteo total de palabras en el texto t}}$$
+De esta forma, las palabras que aparecen en muchos textos —y que, por lo tanto, son poco distintivas, como _the_, _and_ o _a_— reciben un peso bajo, mientras que las que aparecen en pocos textos, presumiblemente más informativas del contenido, reciben un peso alto.
 
-Además se agrega un componente que pondera cada palabra de un cierto texto por el logaritmo de la razón entre el total de palabras en todos los textos y la cantidad de veces que aparece dicha palabra en todo el conjunto de textos:
+La representación final se obtiene multiplicando ambos componentes:
 
-$$IDF_{p}=\frac{\text{cantidad total de textos}}{\text{cantidad de textos que contienen la palabra p}}$$
+$$TF\text{-}IDF_{t,p} = TF_{t,p} \times IDF_{p}$$
 
-Su efecto sobre las palabras genera que aquéllas que aparecen en muchos textos cuenten con un valor relativamente menor, entendíendose que estas son más genéricas (por ejemplo: "the", "and", "a"), mientras que las que aparecen en un menor número de textos son más informativas sobre el contexto de los mismos y por ende cuentan con un valor relativamente mayor.
-
-La representación _Term Frequency - Inverse Document Frequency_ se calcula entonces como el producto entre los dos componentes anteriores:
-
-$$TF \times IDF$$
-
-
-Continuando con las mismas palabras del ejemplo anterior, vemos esta vez su representación TF-IDF:
+Reutilizando las mismas palabras del ejemplo anterior, el Cuadro \ref{tab:ejemplo_tfidf} muestra ahora su representación TF-IDF.
 
 ```{python}
 #| results: asis
 
-
-# TODO: Obtenga la representación TF-IDF del conjunto de entrenamiento
-
-# Muestre el tamaño de la matriz resultante
-
 tfidf_vect = TfidfVectorizer()
 X_train_tfidf = tfidf_vect.fit_transform(X_train)
-X_test_tfidf = tfidf_vect.transform(X_test)
 
-# print(X_train_tfidf.shape)#(10262, 82287)
-# print(X_test_tfidf.shape)#(4398, 82287)
+# X_train_tfidf.shape  # (10262, 82287)
 
 tfidf_names = tfidf_vect.get_feature_names_out()
 
@@ -361,37 +492,17 @@ print(tabla_tfidf)
 
 ```
 
-La mayoría de las palabras de ejemplo, donde el valor de representación no es nulo, cuentan con valores en torno a 0.125, la única palabra que se diferencia en este caso es "Reuters", nombre de uno de los medios de prensa que publica los artículos. Es posible que la misma cuente con un valor menor, ya que no es una palabra muy frecuente dentro de cada texto del ejemplo particular, por lo que su valor de _TF_ sería bajo. Pero también puede deberse a que el medio de prensa es uno de los que más se menciona a sí mismos en los artículos que publica, sumado a que es el medio con el mayor número de artículos publicados (ambos resultados se vieron en la tarea 1 entregada anteriormente), por lo que su IDF la ponderaría con un valor relativamente más bajo.
+En el primer artículo, la mayoría de las palabras del ejemplo toman valores parecidos, en torno a $0.12$–$0.13$. La excepción es \texttt{reuters}, con un valor mucho menor ($0.01$), y esto se explica por los dos componentes a la vez. Por un lado, su _TF_ es bajo: en ese artículo \texttt{reuters} aparece una sola vez, frente a las cuatro apariciones de palabras como \texttt{los} o \texttt{star}. Por otro, y sobre todo, su _IDF_ también es bajo: \texttt{reuters} figura en una gran cantidad de artículos, algo ya previamente visto, donde \texttt{Reuters} resultó ser el medio con más artículos y el que más se menciona a sí mismo. Al estar tan extendida, la palabra aporta poca información para distinguir un artículo de otro, y la transformación la penaliza en consecuencia.
 
-## 5. Visualización PCA sobre TF-IDF
-Muestre en un mapa el conjunto de entrenamiento, utilizando las dos primeras componentes PCA sobre los vectores de TF-IDF.
-Analice los resultados y compare qué sucede si utiliza:
+## 4. Visualización PCA
 
-- a) el filtrado de `stop_words` para idioma inglés;
-- b) el parámetro `use_idf=True`;
-- c) `ngram_range=(1,2)`.
+Una vez transformado el conjunto de datos a las técnicas descritas, podemos explorar la estructura de los datos mediante una reducción de dimensionalidad. Para esto se proyecta el conjunto de entrenamiento sobre las dos primeras componentes principales de los vectores TF-IDF, para observar hasta qué punto los medios resultan separables y analizar cómo cambia esa proyección al variar la representación.
 
-Opcionalmente, también puede analizar qué sucede si no elimina los signos de puntuación.
+Para esto se evaluó el efecto de tres variantes distintas: (a) eliminar las _stop words_ del inglés, palabras vacías estándar más \texttt{s}, \texttt{u}, \texttt{say} y \texttt{said}—; (b) desactivar el IDF quedándonos solo con la frecuencia de término; y (c) incorporar bigramas además de palabras sueltas.
 
-¿Se pueden separar los medios de prensa utilizando sólo 2 componentes principales?
-Haga una visualización que permita entender cómo varía la varianza explicada a medida que se agregan componentes (por ejemplo, hasta 10 componentes).
-
-Discuta además si la separación observada puede deberse a diferencias de estilo editorial, a diferencias temáticas o a pistas explícitas del medio que no hayan sido removidas en la limpieza.
-
-# Respuesta
-
-Observación 1: la función _TfidfVectorizer_ usa por defecto _use_idf=True_, por lo que el ejemplo presentado en la tabla \ref{tab:ejemplo_tfidf} ya incorpora el componente IDF. A continuación comparamos el mapa que se obtiene con el TF-IDF base frente al que resulta de eliminar las _stop words_ del inglés, utilizando la misma lista que en la Tarea 1: las palabras vacías estándar más \texttt{s}, \texttt{u}, \texttt{say} y \texttt{said}.
-
-Observación 2: Computacionalmente no es recomendable aplicar PCA, ya que la matriz resultante tiene dimensiones demasiado grandes y, para aplicar PCA, es necesario primero convertir la matriz esparza en una matriz densa. Por esto, en lugar de PCA, aplicaremos SVD. Esta segunda técnica no necesita centrar la matriz, por lo que puede trabajar directamente con matrices esparzas. Cabe notar que SVD equivale a PCA salvo por ese centrado.
+Dado que se esta trabajando con una matriz dispersa no es recomendable aplicar PCA directamente, ya que requiere convertir la matriz en una matriz densa de dimensiones demasiado grandes. Por eso, en lugar de PCA, se utiliza la descomposición SVD truncada, que puede operar directamente sobre la matriz dispersa al no necesitar centrar los datos. Salvo por ese centrado, ambas técnicas son equivalentes.
 
 ```{python}
-
-#use_idf=True
-
-#PCA
-# pca = PCA(n_components=2, random_state=33)
-# X_pca = pca.fit_transform(X_train_tfidf.toarray())
-
 # SVD
 svd = TruncatedSVD(
     n_components=10,
@@ -420,12 +531,6 @@ tfidf_stop = TfidfVectorizer(
 
 X_train_stop = tfidf_stop.fit_transform(X_train)
 
-#PCA
-# X_pca_stop = PCA(
-#     n_components=2,
-#     random_state=33
-# ).fit_transform(X_train_tfidf_stop.toarray())
-
 #X_train_stop.shape #(10262, 2)
 
 # SVD
@@ -445,83 +550,89 @@ df_svd_stop = pd.DataFrame({
 
 ```
 
+```{python}
+# (b) Sin IDF: solo frecuencia de término
+tfidf_tf = TfidfVectorizer(use_idf=False)
+X_train_tf = tfidf_tf.fit_transform(X_train)
+
+svd_tf = TruncatedSVD(n_components=10, random_state=33)
+X_svd_tf = svd_tf.fit_transform(X_train_tf)
+
+df_svd_tf = pd.DataFrame({
+    "PC1": X_svd_tf[:, 0],
+    "PC2": X_svd_tf[:, 1],
+    "publication": y_train.values,
+})
+
+# (c) Unigramas + bigramas
+tfidf_bigram = TfidfVectorizer(ngram_range=(1, 2))
+X_train_bigram = tfidf_bigram.fit_transform(X_train)
+
+svd_bigram = TruncatedSVD(n_components=10, random_state=33)
+X_svd_bigram = svd_bigram.fit_transform(X_train_bigram)
+
+df_svd_bigram = pd.DataFrame({
+    "PC1": X_svd_bigram[:, 0],
+    "PC2": X_svd_bigram[:, 1],
+    "publication": y_train.values,
+})
+```
+
 
 ```{python}
 #| label: fig-svd-comparacion
-#| fig-cap: "Proyección sobre las dos primeras componentes SVD del conjunto de entrenamiento: TF-IDF base frente a TF-IDF eliminando stop words."
+#| fig-cap: "Proyección sobre las dos primeras componentes SVD del conjunto de entrenamiento: TF-IDF base y las tres variantes de la consigna."
 #| fig-align: center
 #| fig-pos: "H"
 
-fig, axs = plt.subplots(
-    1, 2,
-    figsize=(10, 4.5)
-)
+from matplotlib.lines import Line2D
+
+colores_medios = {
+    "Reuters": "tab:orange",
+    "CNBC": "tab:blue",
+    "The New York Times": "tab:green",
+}
 
 casos = [
-    ("TF-IDF", df_svd),
-    ("Stop words", df_svd_stop)
+    ("TF-IDF base", df_svd),
+    ("(a) Stop words", df_svd_stop),
+    ("(b) Sin IDF (use_idf=False)", df_svd_tf),
+    ("(c) Unigramas + bigramas", df_svd_bigram),
 ]
 
+fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+
 for ax, (titulo, df_plot) in zip(axs.ravel(), casos):
-
-    for medio in sorted(df_plot["publication"].unique()):
-
-        subset = df_plot[
-            df_plot["publication"] == medio
-        ]
-
+    for medio, color in colores_medios.items():
+        subset = df_plot[df_plot["publication"] == medio]
         ax.scatter(
-            subset["PC1"],
-            subset["PC2"],
-            s=15,
-            alpha=0.15,
-            label=medio
+            subset["PC1"], subset["PC2"],
+            s=10, alpha=0.12, color=color
         )
+    ax.set_title(titulo, fontsize=10, pad=4)
+    ax.tick_params(axis="both", labelsize=8)
 
-    ax.set_title(
-        titulo,
-        fontsize=10,
-        pad=4
-    )
+fig.supxlabel("Componente 1", fontsize=10, y=0.04)
+fig.supylabel("Componente 2", fontsize=10, x=0.04)
 
-    ax.tick_params(
-        axis="both",
-        labelsize=8
-    )
-
-# Etiquetas globales
-fig.supxlabel(
-    "Componente 1",
-    fontsize=10,
-    y=0.02
-)
-
-fig.supylabel(
-    "Componente 2",
-    fontsize=10,
-    x=0.02
-)
-
-# Leyenda única
-handles, labels = axs.ravel()[0].get_legend_handles_labels()
-
+handles = [
+    Line2D([0], [0], marker="o", linestyle="", color=color, label=medio)
+    for medio, color in colores_medios.items()
+]
 fig.legend(
-    handles,
-    labels,
-    loc="lower center",
-    ncol=3,
-    fontsize=8,
-    frameon=True,
-    bbox_to_anchor=(0.5, -0.06)
+    handles=handles, loc="lower center", ncol=3,
+    fontsize=8, frameon=True, bbox_to_anchor=(0.5, -0.01)
 )
 
-# Ajustar espacios
-plt.tight_layout(
-    rect=[0.04, 0.08, 1, 0.96]
-)
-
+plt.tight_layout(rect=[0.04, 0.05, 1, 0.97])
 plt.show()
 ```
+
+En los cuatro casos los medios aparecen fuertemente solapados: ninguna de las representaciones logra separarlos de forma limpia en dos dimensiones. Aun así, las variantes se comportan de manera muy distinta. El TF-IDF base y la versión con _stop words_ producen graficos con forma similar, en los que se insinúa cierta organización: \texttt{Reuters} y \texttt{The New York Times} tienden a ocupar regiones algo diferentes, con \texttt{CNBC} repartido entre ambas, aunque con mucho solapamiento. Quitar las _stop words_ no cambia demasiado el aspecto del mapa, pero sí reduce la varianza que capturan las primeras componentes (de un 3,9\% a un 1,5\% en las dos primeras).
+
+El cambio más marcado aparece al desactivar el IDF (\texttt{use\_idf=False}). En ese caso las dos primeras componentes concentran mucha más varianza (alrededor del 16\%), pero esa varianza no separa a los medios: el primer plano principal se ordena a lo largo de un eje dominado por las palabras más frecuentes —comunes a todos los medios—, y las clases quedan aún más mezcladas. Esto ilustra el rol del IDF: al penalizar los términos ubicuos, evita que la representación quede gobernada por vocabulario genérico y deja lugar a las diferencias entre medios.
+
+Incorporar bigramas (\texttt{ngram\_range=(1,2)}), por su parte, multiplica el tamaño del vocabulario de unas 82.000 columnas a más de 1,4 millones pero apenas modifica la proyección, que se mantiene muy parecida a la de unigramas. 
 
 ```{python}
 #| label: fig-varianza-svd
@@ -531,19 +642,18 @@ plt.show()
 
 plt.figure(figsize=(8, 5))
 
-plt.plot(
-    range(1, 11),
-    np.cumsum(svd.explained_variance_ratio_),
-    marker="o",
-    label="TF-IDF"
-)
-
-plt.plot(
-    range(1, 11),
-    np.cumsum(svd_stop.explained_variance_ratio_),
-    marker="o",
-    label="Stop words"
-)
+for nombre, modelo in [
+    ("TF-IDF base", svd),
+    ("(a) Stop words", svd_stop),
+    ("(b) Sin IDF", svd_tf),
+    ("(c) Bigramas", svd_bigram),
+]:
+    plt.plot(
+        range(1, 11),
+        np.cumsum(modelo.explained_variance_ratio_),
+        marker="o",
+        label=nombre,
+    )
 
 plt.xlabel("Número de componentes")
 plt.ylabel("Varianza explicada acumulada")
@@ -554,7 +664,9 @@ plt.legend()
 plt.show()
 ```
 
-Las dos primeras componentes no separan de forma nítida a los medios, pero dejan ver cierta estructura. Para entender si esa estructura responde a diferencias temáticas, aprovechamos que el propio conjunto de datos ya trae un área temática etiquetada en la variable \texttt{section}. En el Cuadro \ref{tab:top-secciones} se listan las cinco secciones más frecuentes de cada medio, que reflejan con bastante claridad su perfil editorial: \texttt{Reuters} se concentra en secciones financieras y de mercados, \texttt{The New York Times} reparte su cobertura entre noticias, opinión, cultura y deportes, y \texttt{CNBC} mezcla negocios, tecnología y política.
+La Figura \ref{fig-varianza-svd} confirma la dificultad: en las representaciones con IDF, las dos primeras componentes explican menos del 4\% de la varianza total y, aun con diez componentes, no se supera el 8\%. Por lo tanto no es posible separar a los medios usando solo dos componentes principales, ya que la información que los distingue está repartida en muchas direcciones del espacio.
+
+Las dos primeras componentes, de todos modos, dejan entrever cierta estructura. Para entender si responde a diferencias temáticas, aprovechamos que el propio conjunto de datos ya trae un área temática etiquetada en la variable \texttt{section}. En el Cuadro \ref{tab:top-secciones} se listan las cinco secciones más frecuentes de cada medio, que reflejan con bastante claridad su perfil editorial: \texttt{Reuters} se concentra en secciones financieras y de mercados, \texttt{The New York Times} reparte su cobertura entre noticias, opinión, cultura y deportes, y \texttt{CNBC} mezcla negocios, tecnología y política.
 
 ```{python}
 #| results: asis
@@ -667,10 +779,6 @@ plt.show()
 
 La figura confirma la lectura temática. La sección de mercados (*Markets*) se ubica en la franja de negocios que comparten \texttt{Reuters} y \texttt{CNBC}, mientras que en el extremo opuesto se agrupan las secciones más editoriales y culturales de \texttt{The New York Times} (*opinion*, *arts*, *sports*), que arrastran su centro de gravedad hacia abajo.
 
-La sección *World News*, en cambio, de contenido más general, no se acerca a ningún medio en particular sino que cae en la zona central compartida. Este contraste es el dato más interesante: las secciones de noticia general gravitan hacia el centro, mientras que las que definen la identidad de cada medio (los mercados para \texttt{Reuters} y \texttt{CNBC}, la cobertura cultural y de opinión para \texttt{The New York Times}) se alejan hacia su propio extremo. Esto explica por qué los medios se solapan tanto en el mapa: comparten la cobertura de temas generales y se diferencian sobre todo en sus secciones más específicas.
-
-En conjunto, la posición de cada medio queda bien explicada por la mezcla de secciones que publica, lo que indica que la separación observada responde en buena medida a diferencias temáticas y de cobertura editorial. Aunque parte de esa diferencia podría reflejar además un estilo de redacción propio de cada medio, el hecho de que las secciones se ordenen según su temática sugiere que el factor dominante es el contenido. No puede descartarse, de todos modos, el efecto de pistas explícitas del medio, ya que la limpieza no elimina menciones como el propio nombre de la publicación (de hecho, \texttt{reuters} aparecía como término en el ejemplo de TF-IDF). Por último, conviene recordar que estas dos componentes capturan apenas una fracción de la varianza total (Figura \ref{fig-varianza-svd}); la separación plena de los medios no se alcanza en el plano, sino al incorporar más dimensiones.
-
 # Parte 2: Entrenamiento y Evaluación de Modelos
 
 ## 1. Multinomial Naive Bayes
@@ -684,12 +792,28 @@ Considere qué sucedería con esta métrica si el desbalance de datos fuera aún
 
 **Sugerencia**: utilice el método `from_predictions` de `ConfusionMatrixDisplay` para realizar la matriz.
 
+A diferencia de la Parte 1, donde se trabajó con el TF-IDF base, para entrenar los modelos partimos de una representación que elimina las *stop words* y, además, las **referencias directas a los medios**: su propio nombre, el de su empresa matriz y los dominios web. Esta decisión está motivada por las pistas detectadas en la Tarea 1, y busca evitar que el clasificador aproveche menciones explícitas del propio medio en lugar de aprender de su contenido.
+
+```{python}
+# Features para los modelos: TF-IDF eliminando stop words y referencias directas a los medios
+stopwords_modelo = list(ENGLISH_STOP_WORDS) + ["s", "u", "say", "said"]
+referencias_medios = [
+    "reuters", "cnbc", "nyt", "nytimes", "newyorktimes",
+    "new", "york", "times", "com", "eikon", "thomson"
+]
+stopwords_modelo = stopwords_modelo + referencias_medios
+
+tfidf_model = TfidfVectorizer(stop_words=stopwords_modelo)
+X_train_model = tfidf_model.fit_transform(X_train)
+X_test_model = tfidf_model.transform(X_test)
+```
+
 ```{python}
 # Entrenamiento del modelo y predicción sobre el conjunto de test
 mnb = MultinomialNB()
-mnb.fit(X_train_tfidf, y_train)
+mnb.fit(X_train_model, y_train)
 
-y_pred_mnb = mnb.predict(X_test_tfidf)
+y_pred_mnb = mnb.predict(X_test_model)
 
 acc_mnb = accuracy_score(y_test, y_pred_mnb)
 print(f"Accuracy en test: {acc_mnb:.3f}")
@@ -775,9 +899,9 @@ Explique brevemente cómo funciona y compare los resultados con el anterior.
 # Regresión logística multinomial con regularización L2 (por defecto en sklearn),
 # entrenada sobre las mismas features TF-IDF
 logreg = LogisticRegression(max_iter=1000, C=1.0)
-logreg.fit(X_train_tfidf, y_train)
+logreg.fit(X_train_model, y_train)
 
-y_pred_lr = logreg.predict(X_test_tfidf)
+y_pred_lr = logreg.predict(X_test_model)
 
 acc_lr = accuracy_score(y_test, y_pred_lr)
 print(f"Accuracy en test: {acc_lr:.3f}")
@@ -831,6 +955,91 @@ latex_lr = latex_lr.replace(
 )
 print(latex_lr)
 ```
+
+Una ventaja de la regresión logística frente al Naive Bayes es que sus coeficientes son fácilmente interpretables. La matriz `logreg.coef_` tiene una fila por medio y una columna por palabra, y el coeficiente asociado a cada palabra indica cuánto empuja su presencia la predicción hacia ese medio. En la Figura \ref{fig-coef-logreg} se muestran, para cada medio, las palabras con mayor coeficiente positivo, es decir, las más relevantes a la hora de clasificar.
+
+```{python}
+#| label: fig-coef-logreg
+#| fig-cap: "Palabras con mayor coeficiente positivo para cada medio en la regresión logística multinomial."
+#| fig-align: center
+#| fig-pos: "H"
+
+nombres = np.array(tfidf_model.get_feature_names_out())
+colores = {
+    "Reuters": "tab:orange",
+    "CNBC": "tab:blue",
+    "The New York Times": "tab:green"
+}
+k = 12
+
+fig, axs = plt.subplots(1, 3, figsize=(13, 5))
+for ax, medio in zip(axs, logreg.classes_):
+    i = list(logreg.classes_).index(medio)
+    coef = logreg.coef_[i]
+    top = np.argsort(coef)[::-1][:k]
+    ax.barh(nombres[top][::-1], coef[top][::-1], color=colores[medio])
+    ax.set_title(medio, fontsize=11)
+    ax.tick_params(axis="y", labelsize=9)
+    ax.set_xlabel("Coeficiente")
+
+plt.tight_layout()
+plt.show()
+```
+
+Lo que más llama la atención es que, **aun habiendo quitado las stop words y los nombres de los medios**, casi ninguna de las palabras más influyentes es temática: el modelo se apoya sobre todo en marcas de estilo y de formato. \texttt{Reuters} se reconoce por el formato de sus cables (*editing*, *reporting*, *text*, *source*, *writing*, *newsroom*) y por rastros de su estructura interna (*corp*, *bengaluru*, sede de una de sus redacciones). \texttt{The New York Times} se identifica por sus honoríficos característicos (*mr*, *ms*, *dr*) y por vocabulario editorial (*article*, *editor*, *newsletter*). \texttt{CNBC}, en cambio, aparece asociado a contracciones del inglés informal (*don*, *ve*, *ll*, *didn*, fragmentos de "don't", "I've", etc.) y a algunos nombres y temas propios (*ceo*, *trump*, *china*, *cramer*, conductor del canal).
+
+El resultado es revelador: eliminar las referencias directas al medio no alcanzó para forzar al modelo a fijarse en el contenido. La señal más fuerte sigue proviniendo del estilo y el formato (plantillas de redacción, honoríficos, contracciones) e incluso de entidades muy asociadas a cada medio (su sede, sus conductores), además de artefactos de la propia limpieza, como las contracciones partidas al eliminar los apóstrofes. En otras palabras, el clasificador aprende a distinguir *cómo* y *quién* escribe antes que *de qué* se habla. Para medir la verdadera capacidad de diferenciar medios por su temática habría que seguir limpiando estas marcas, y es esperable que la tarea se vuelva entonces bastante más difícil.
+
+Por último, vale la pena ver el rol de la **regularización**, que es lo que controla cuánto peso puede tomar cada palabra. La Figura \ref{fig-path} ilustra, sobre un vocabulario reducido a 400 términos para que el cálculo sea rápido, cómo evolucionan los coeficientes de algunas palabras a medida que se afloja la penalización (es decir, al aumentar $C$, el inverso de la fuerza de regularización), comparando las penalizaciones L2 (*Ridge*) y L1 (*Lasso*).
+
+```{python}
+#| label: fig-path
+#| fig-cap: "Trayectoria de los coeficientes de algunas palabras al variar la regularización, con penalización L2 (Ridge) y L1 (Lasso), sobre un vocabulario reducido."
+#| fig-align: center
+#| fig-pos: "H"
+
+tfidf_path = TfidfVectorizer(stop_words=stopwords_modelo, max_features=400)
+X_path = tfidf_path.fit_transform(X_train)
+vocab = {w: i for i, w in enumerate(tfidf_path.get_feature_names_out())}
+
+seguir = {
+    "editing": "Reuters", "reporting": "Reuters",
+    "mr": "The New York Times", "ms": "The New York Times",
+    "trump": "CNBC", "china": "CNBC"
+}
+seguir = {w: m for w, m in seguir.items() if w in vocab}
+
+Cs = np.logspace(-2, 2, 9)
+paths = {pen: {w: [] for w in seguir} for pen in ["l2", "l1"]}
+for pen in ["l2", "l1"]:
+    for C in Cs:
+        ovr = OneVsRestClassifier(
+            LogisticRegression(penalty=pen, solver="liblinear", C=C, max_iter=2000)
+        ).fit(X_path, y_train)
+        clases = list(ovr.classes_)
+        for w, medio in seguir.items():
+            est = ovr.estimators_[clases.index(medio)]
+            paths[pen][w].append(est.coef_[0, vocab[w]])
+
+fig, axs = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
+for ax, pen, titulo in zip(axs, ["l2", "l1"], ["Ridge (L2)", "Lasso (L1)"]):
+    for w, medio in seguir.items():
+        ax.plot(Cs, paths[pen][w], marker="o", ms=3, color=colores[medio])
+        ax.annotate(
+            w, (Cs[-1], paths[pen][w][-1]),
+            fontsize=8, color=colores[medio],
+            xytext=(4, 0), textcoords="offset points"
+        )
+    ax.set_xscale("log")
+    ax.set_title(titulo)
+    ax.set_xlabel("C (inverso de la regularización)")
+    ax.axhline(0, color="gray", lw=0.6, ls="--")
+axs[0].set_ylabel("Coeficiente")
+plt.tight_layout()
+plt.show()
+```
+
+En ambos casos, cuando la regularización es fuerte (a la izquierda, con $C$ pequeño) todos los coeficientes se encogen hacia cero y el modelo resulta más simple; al aflojarla (hacia la derecha) cada palabra puede pesar más. La diferencia está en *cómo* lo hacen: con **L2 (Ridge)** los coeficientes se reducen de forma suave pero rara vez llegan a cero, mientras que con **L1 (Lasso)** las palabras menos informativas se "apagan", es decir, su coeficiente pasa a ser exactamente cero (se aprecia, por ejemplo, en *trump* y *china* bajo regularización fuerte), lo que produce un modelo más ralo que selecciona de forma automática las palabras más útiles.
 
 ## 5. Cambio de medio de prensa
 Evalúe el problema cambiando al menos un medio de prensa.
