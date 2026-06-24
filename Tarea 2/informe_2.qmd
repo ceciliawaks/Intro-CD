@@ -21,12 +21,12 @@ execute:
 ```{r}
 library(reticulate)
 
-# use_python(
-#    "C:/Users/facur/anaconda3/envs/fertcast/python.exe",
-#    required = TRUE
-#  )
+use_python(
+    "C:/Users/facur/anaconda3/envs/fertcast/python.exe",
+    required = TRUE
+)
 
-Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
+#Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
 
 ```
 
@@ -50,7 +50,6 @@ from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer, EN
 from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.linear_model import LogisticRegression
-from sklearn.multiclass import OneVsRestClassifier
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
@@ -275,7 +274,7 @@ plt.show();
 ```
 :::
 
-Para esta tarea primero se traducirá el texto a una representación numérica con la que un modelo pueda operar, explorando técnicas como *bag of words* y *TF-IDF*, y observando mediante una reducción de dimensionalidad hasta qué punto los medios resultan separables. Luego se entrena y evalúa el rendimiento de modelos como *Multinomial Naive Bayes*, midiendo su desempeño con métricas de clasificación.
+En este caso primero se traducirá el texto a una representación numérica con la que un modelo pueda operar, explorando técnicas como *bag of words* y *TF-IDF*, y observando mediante una reducción de dimensionalidad hasta qué punto los medios resultan separables. Luego se entrena y evalúa el rendimiento de modelos como *Multinomial Naive Bayes*, midiendo su desempeño con métricas de clasificación.
 
 # Dataset y representación numérica de texto
 
@@ -321,7 +320,9 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_
 
 ```
 
-Para verificar que la estratificación efectivamente preservó el balance original, en la Figura \ref{fig-balance-clases} se compara la proporción de artículos de cada medio en el conjunto total y en los conjuntos de entrenamiento y test.
+Para verificar que la estratificación efectivamente preservó el balance original, en la Figura \ref{fig-balance-clases} se compara la proporción de artículos de cada medio en el conjunto total y en los conjuntos de entrenamiento y test. 
+
+Las proporciones resultan prácticamente idénticas en los tres conjuntos: las diferencias entre train y test no superan la centésima de punto porcentual para ningún medio. De todas formas, la figura vuelve a dejar en evidencia el marcado desbalance entre clases, con \texttt{Reuters} representando casi dos tercios del total. Este desbalance no se corrige, sino que se mantiene de forma deliberada para trabajar sobre los datos tal como se presentan, pero conviene tenerlo presente de cara a la evaluación de los modelos, ya que condiciona la interpretación de métricas como la \textit{accuracy}, según se discutirá posteriormente.
 
 ```{python}
 #| label: fig-balance-clases
@@ -364,8 +365,6 @@ for contenedor in ax.containers:
 plt.tight_layout()
 plt.show()
 ```
-
-Las proporciones resultan prácticamente idénticas en los tres conjuntos: las diferencias entre train y test no superan la centésima de punto porcentual para ningún medio. De todas formas, la figura vuelve a dejar en evidencia el marcado desbalance entre clases, con \texttt{Reuters} representando casi dos tercios del total. Este desbalance no se corrige, sino que se mantiene de forma deliberada para trabajar sobre los datos tal como se presentan, pero conviene tenerlo presente de cara a la evaluación de los modelos, ya que condiciona la interpretación de métricas como la \textit{accuracy}, según se discutirá posteriormente.
 
 ## 2. Representación Bag of Words
 
@@ -437,7 +436,7 @@ print(tabla_bow)
 
 El ejemplo ya anticipa una característica central de esta representación: la enorme mayoría de las celdas valen cero. Cada artículo utiliza apenas una pequeña fracción del vocabulario total; en este subconjunto, el promedio de palabras por artículo es de aproximadamente $424 \ll 82287$, muy por debajo del número de columnas. Incluso el artículo más extenso, con $12069 < 82287$ palabras, está lejos de cubrir el vocabulario completo, de modo que la fila que le corresponde sigue estando dominada por ceros. Por este motivo se dice que la matriz es dispersa.
 
-Por último, vale señalar que esta representación es generalizable: en lugar de contar palabras sueltas, puede contarse la frecuencia de cada secuencia de $n$ palabras consecutivas —un **n-grama**, es decir, una secuencia de $n$ elementos contiguos—, en lo que se conoce como *bag of n-grams*. Vista así, BOW no es más que el caso particular con $n=1$.
+Por último, vale señalar que esta representación es generalizable: en lugar de contar palabras sueltas, puede contarse la frecuencia de cada secuencia de $n$ palabras consecutivas un **n-grama**, es decir, una secuencia de $n$ elementos contiguos, en lo que se conoce como *bag of n-grams*. Vista así, BOW no es más que el caso particular con $n=1$.
 
 ## 3. Representación TF-IDF
 
@@ -449,7 +448,9 @@ El segundo componente, *Inverse Document Frequency* (IDF), pondera cada palabra 
 
 $$IDF_{p}=\log\!\left(\frac{\text{cantidad total de textos}}{\text{cantidad de textos que contienen la palabra } p}\right)$$
 
-De esta forma, las palabras que aparecen en muchos textos —y que, por lo tanto, son poco distintivas, como _the_, _and_ o _a_— reciben un peso bajo, mientras que las que aparecen en pocos textos, presumiblemente más informativas del contenido, reciben un peso alto.
+De esta forma, las palabras que aparecen en muchos textos y que, por lo tanto, son poco distintivas, como _the_, _and_ o _a_ reciben un peso bajo, mientras que las que aparecen en pocos textos, presumiblemente más informativas del contenido, reciben un peso alto.
+
+\newpage
 
 La representación final se obtiene multiplicando ambos componentes:
 
@@ -497,7 +498,7 @@ En el primer artículo, la mayoría de las palabras del ejemplo toman valores pa
 
 Una vez transformado el conjunto de datos a las técnicas descritas, podemos explorar la estructura de los datos mediante una reducción de dimensionalidad. Para esto se proyecta el conjunto de entrenamiento sobre las dos primeras componentes principales de los vectores TF-IDF, para observar hasta qué punto los medios resultan separables y analizar cómo cambia esa proyección al variar la representación.
 
-Para esto se evaluó el efecto de tres variantes distintas: (a) eliminar las _stop words_ del inglés, palabras vacías estándar más \texttt{s}, \texttt{u}, \texttt{say} y \texttt{said}—; (b) desactivar el IDF quedándonos solo con la frecuencia de término; y (c) incorporar bigramas además de palabras sueltas.
+Para esto se evaluó el efecto de tres variantes distintas: (a) eliminar las _stop words_ del inglés, palabras vacías estándar más \texttt{s}, \texttt{u}, \texttt{say} y \texttt{said}; (b) desactivar el IDF quedándonos solo con la frecuencia de término; y (c) incorporar bigramas además de palabras sueltas.
 
 Dado que se esta trabajando con una matriz dispersa no es recomendable aplicar PCA directamente, ya que requiere convertir la matriz en una matriz densa de dimensiones demasiado grandes. Por eso, en lugar de PCA, se utiliza la descomposición SVD truncada, que puede operar directamente sobre la matriz dispersa al no necesitar centrar los datos. Salvo por ese centrado, ambas técnicas son equivalentes.
 
@@ -663,49 +664,17 @@ plt.legend()
 plt.show()
 ```
 
-La Figura \ref{fig-varianza-svd} confirma la dificultad: en las representaciones con IDF, las dos primeras componentes explican menos del 4\% de la varianza total y, aun con diez componentes, no se supera el 8\%. Por lo tanto no es posible separar a los medios usando solo dos componentes principales, ya que la información que los distingue está repartida en muchas direcciones del espacio.
+La Figura \ref{fig-varianza-svd} confirma la poca varianza explicada del primer plano principal, las dos primeras componentes explican menos del 4\% de la varianza total y, aun con diez componentes, no se supera el 8\%. Por lo tanto no es posible separar a los medios usando solo dos componentes principales, ya que la información que los distingue está repartida en muchas direcciones del espacio.
 
-Las dos primeras componentes, de todos modos, dejan entrever cierta estructura. Para entender si responde a diferencias temáticas, aprovechamos que el propio conjunto de datos ya trae un área temática etiquetada en la variable \texttt{section}. En el Cuadro \ref{tab:top-secciones} se listan las cinco secciones más frecuentes de cada medio, que reflejan con bastante claridad su perfil editorial: \texttt{Reuters} se concentra en secciones financieras y de mercados, \texttt{The New York Times} reparte su cobertura entre noticias, opinión, cultura y deportes, y \texttt{CNBC} mezcla negocios, tecnología y política.
-
-```{python}
-#| results: asis
-
-top_secciones = {}
-for medio in ["Reuters", "The New York Times", "CNBC"]:
-    vc = (
-        df_top_3.loc[df_top_3["publication"] == medio, "section"]
-        .value_counts(dropna=True)
-    )
-    total = vc.sum()
-    top_secciones[medio] = [
-        f"{nombre} ({100 * n / total:.1f}%)"
-        for nombre, n in vc.head(5).items()
-    ]
-
-tabla_sec = pd.DataFrame(top_secciones)
-tabla_sec.index = [1, 2, 3, 4, 5]
-
-latex_sec = tabla_sec.to_latex(
-    index=True,
-    escape=True,
-    caption="Cinco secciones más frecuentes en cada medio (porcentaje sobre los artículos con sección registrada).",
-    label="tab:top-secciones",
-    column_format="clll"
-)
-latex_sec = latex_sec.replace(
-    "\\begin{table}",
-    "\\begin{table}[H]\n\\centering\n\\scriptsize"
-)
-print(latex_sec)
-```
-
-En el caso de \texttt{CNBC}, la etiqueta más frecuente es \emph{Wires}, que agrupa despachos de agencia y no constituye una temática en sí, por lo que se omite del gráfico que sigue. A partir de ellas tomamos algunas secciones representativas y, sobre el mismo espacio SVD del TF-IDF con stop words, calculamos su centro de gravedad como la posición media de los artículos de entrenamiento que pertenecen a cada sección (Figura \ref{fig-centroides}).
+Las dos primeras componentes, de todos modos, dejan entrever cierta estructura. Para entender si responde a diferencias temáticas, se visualizaron los centros de gravedad de distintas temáticas o posición de palabras relevantes en el plano principal. En la Figura \ref{fig-centroides} podemos ver cierta de esta estructura: la sección de mercados (*Markets*) se ubica en la franja de negocios que comparten \texttt{Reuters} y \texttt{CNBC}, mientras que en el extremo opuesto se agrupan las secciones más editoriales y culturales de \texttt{The New York Times} (*opinion*, *arts*, *sports*), que arrastran su centro de gravedad hacia abajo.
 
 ```{python}
 #| label: fig-centroides
-#| fig-cap: "Centros de gravedad de cada medio y de sus secciones más representativas, sobre las dos primeras componentes SVD del TF-IDF con stop words."
+#| fig-cap: "Centros de gravedad de cada medio y de algunas secciones representativas, sobre las dos primeras componentes SVD del TF-IDF con stop words. En rojo se marcan algunas palabras muy utilizadas de Reuters que caracterizan la zona superior del plano."
 #| fig-align: center
 #| fig-pos: "H"
+
+from matplotlib.lines import Line2D
 
 df_svd_stop["section"] = df_top_3.loc[X_train.index, "section"].values
 
@@ -735,6 +704,23 @@ sec_off = {
     "opinion": (8, -10, "left"),
     "arts": (-8, -12, "right"),
     "sports": (-8, 10, "right")
+}
+
+# Palabras del formato/marca de Reuters: centroide = posición media de los
+# artículos de entrenamiento que las contienen
+palabras_reuters = ["newsroom", "eikon", "coverage", "source"]
+pal_cent = {
+    w: df_svd_stop.loc[
+        X_train.str.contains(rf"\b{w}\b", regex=True, na=False).to_numpy(),
+        ["PC1", "PC2"],
+    ].mean()
+    for w in palabras_reuters
+}
+pal_off = {
+    "newsroom": (9, 5, "left"),
+    "eikon": (-9, 2, "right"),
+    "coverage": (10, 0, "left"),
+    "source": (9, -11, "left"),
 }
 
 fig, ax = plt.subplots(figsize=(9, 6.5))
@@ -768,6 +754,25 @@ for s, c in sec_cent.items():
         xytext=(dx, dy), textcoords="offset points", ha=ha
     )
 
+for w, c in pal_cent.items():
+    ax.scatter(
+        c["PC1"], c["PC2"], s=70, marker="D",
+        color="crimson", edgecolor="black", linewidth=0.6, zorder=9
+    )
+    dx, dy, ha = pal_off[w]
+    ax.annotate(
+        w, (c["PC1"], c["PC2"]),
+        fontsize=9, color="crimson", fontweight="bold", zorder=10,
+        xytext=(dx, dy), textcoords="offset points", ha=ha
+    )
+
+leyenda = [
+    Line2D([0], [0], marker="o", ls="", color="gray", mec="black", label="Medio"),
+    Line2D([0], [0], marker="s", ls="", color="gray", mec="black", label="Sección"),
+    Line2D([0], [0], marker="D", ls="", color="crimson", mec="black", label="Palabra de Reuters"),
+]
+ax.legend(handles=leyenda, loc="upper right", fontsize=9, framealpha=0.9)
+
 ax.axhline(0, ls="--", lw=0.6, color="gray", alpha=0.5)
 ax.set_xlabel("Componente 1")
 ax.set_ylabel("Componente 2")
@@ -776,15 +781,18 @@ plt.tight_layout()
 plt.show()
 ```
 
-La figura confirma la lectura temática. La sección de mercados (*Markets*) se ubica en la franja de negocios que comparten \texttt{Reuters} y \texttt{CNBC}, mientras que en el extremo opuesto se agrupan las secciones más editoriales y culturales de \texttt{The New York Times} (*opinion*, *arts*, *sports*), que arrastran su centro de gravedad hacia abajo.
 
-# Parte 2: Entrenamiento y Evaluación de Modelos
+Por último, vale destacar qué términos llevan a \texttt{Reuters} a la parte superior del plano, donde se separa del resto. En esa zona se observan palabras como \emph{newsroom}, \emph{eikon}, \emph{coverage} y \emph{source}. Dichas palabras que están presentes en casi todos sus artículos y casi en ningún otro medio, son utilizadas por el medio para cerrar artículos.
+
+\newpage
+
+# Entrenamiento y Evaluación de Modelos
 
 ## 1. Multinomial Naive Bayes
 
-A diferencia de la Parte 1, donde se trabajó con el TF-IDF base, para entrenar los modelos partimos de una representación que elimina las *stop words* y, además, las **referencias directas a los medios**: su propio nombre, el de su empresa matriz y los dominios web. Esta decisión está motivada por las pistas detectadas en la Tarea 1, y busca evitar que el clasificador aproveche menciones explícitas del propio medio en lugar de aprender de su contenido.
+A diferencia de la primer parte, donde se trabajó con el TF-IDF base, para entrenar los modelos partimos de una representación que elimina las *stop words* y, además, las **referencias directas a los medios**: su propio nombre, el de su empresa matriz y los dominios web. Esta decisión está motivada por las pistas detectadas en la Tarea 1, y busca evitar que el clasificador aproveche menciones explícitas del propio medio en lugar de aprender de su contenido.
 
-Se entrena entonces un modelo Multinomial Naive Bayes base, el cual define sus parámetros con valores por defecto de la función _MultinomialNB_, por lo que en este caso el parámetro *alpha* toma el valor 1 (en secciones siguientes se profundiza sobre este parámetro).
+Se entrena entonces un modelo Multinomial Naive Bayes base, el cual define sus parámetros con valores por defecto de la función _MultinomialNB_.
 
 Se obtiene el *accuracy* del modelo y distintas medidas del desempeño en las predicciones para cada uno de los medios de prensa y presentamos la respectiva matriz de confusión.
 
@@ -820,6 +828,7 @@ acc_mnb = accuracy_score(y_test, y_pred_mnb);
 #| fig-cap: "Matriz de confusión del modelo Multinomial Naive Bayes sobre el conjunto de test."
 #| fig-align: center
 #| fig-pos: "H"
+#| out-width: "65%"
 
 # Matriz de confusión en cantidades absolutas
 cm_abs = confusion_matrix(
@@ -872,8 +881,6 @@ plt.show()
 
 La matriz de difusión presentada en la Figura \ref{fig-cm-mnb} expone en cada celda la cantidad de artículos predichos como pertenecientes al medio en la correspondiente columna, que pertenecen en la realidad al medio correspondiente a su fila. Además, se muestra a qué porcentaje de artículos dentro del medio real corresponde esa cantidad.
 
-
-
 ```{python}
 #| results: asis
 
@@ -913,37 +920,27 @@ latex_mnb = tabla_mnb.to_latex(
 print(latex_mnb)
 ```
 
-La métricas presentadas en la Tabla \ref{metricas-mn} se relacionan directamente con la matriz de confusión:
+La métricas presentadas en la Tabla \ref{tab:metricas-mnb} se relacionan directamente con la matriz de confusión:
 
 - El *recall* de cada medio se lee por filas, ya que mide qué proporción de los artículos reales de ese medio fue correctamente clasificada. 
 - La *precision*, en cambio, se interpreta por columnas, porque mide qué proporción de los artículos predichos como un medio realmente pertenecía a ese medio. 
 - El *F1-score* resume ambas dimensiones mediante un promedio armónico, por lo que penaliza los casos en los que una de las dos métricas es alta pero la otra es muy baja.
 
 
-La Figura \ref{fig-cm-mnb} muestra que el modelo Multinomial Naive Bayes base tiende a predecir una gran proporción de artículos como \text{Reuters}. Esto se observa especialmente en la fila correspondiente a \text{CNBC}: de los 773 artículos reales de este medio, solo 16 son clasificados correctamente como \text{CNBC}, mientras que 744 son clasificados erróneamente como \text{Reuters}. En términos porcentuales, esto implica que el modelo solo recupera el 2.1 % de los artículos de \text{CNBC}. Por lo tanto, aunque la *precision* para este medio es igual a 1, este valor debe interpretarse con cuidado: todos los artículos que el modelo predijo como \text{CNBC} efectivamente pertenecían a \text{CNBC}, pero el modelo casi nunca eligió esta clase. Esto explica que el *recall* de \text{CNBC} sea muy bajo, igual a 0.021, y que su *F1-score* también sea bajo, igual a 0.041.
-
-Para \text{Reuters} ocurre lo contrario. La matriz de confusión muestra que el modelo clasifica correctamente 2769 de los 2782 artículos reales de \text{Reuters}, es decir, alcanza un *recall* de 0.995. Esto indica que casi todos los artículos de \text{Reuters} son identificados como tales. Sin embargo, la *precision* de \text{Reuter}s es menor, igual a 0.697, porque muchas predicciones de \text{Reuters} provienen en realidad de otros medios: 744 artículos de \text{CNBC} y 457 de \text{The New York Times} fueron clasificados erróneamente como \text{Reuters}. En este caso, el modelo tiene una alta capacidad para recuperar los artículos reales de \text{Reuters}, pero también asigna demasiados artículos de otras clases a esta categoría.
-
-En el caso de \text{The New York Times}, el modelo clasifica correctamente 386 de 843 artículos reales, lo que da un *recall* de 0.458. Es decir, logra identificar algo menos de la mitad de los artículos de este medio. La *precision*, en cambio, es alta, igual a 0.937, porque la mayoría de los artículos que el modelo predice como \text{The New York Times} efectivamente pertenecen a ese medio. Su *F1-score* de 0.615 refleja este comportamiento intermedio: el modelo es relativamente confiable cuando predice esta clase, pero deja sin recuperar una proporción importante de sus artículos reales.
+La Figura \ref{fig-cm-mnb} muestra que el modelo tiende a sobre-predecir \texttt{Reuters}. Esto se traduce en un *recall* muy alto para ese medio (0.995: acierta 2769 de sus 2782 artículos), pero en una *precision* más baja (0.697), porque \texttt{Reuters} absorbe buena parte de los errores del resto: 744 artículos de \texttt{CNBC} y 457 de \texttt{The New York Times} terminan clasificados como \texttt{Reuters}. El caso más extremo es \texttt{CNBC}, del que el modelo solo acierta 16 de 773 artículos (*recall* de apenas 0.021); su *precision* es 1, pero el valor engaña, porque casi nunca predice esta clase, y de ahí que su *F1-score* sea muy bajo (0.041). \texttt{The New York Times} queda en una situación intermedia: un *recall* de 0.458 (386 de 843 artículos) y una *precision* alta de 0.937, con un *F1-score* de 0.615.
 
 
-Mirar solamente el *accuracy* puede ser problemático. El modelo alcanza un *accuracy* de 0.721, lo que a primera vista podría sugerir un desempeño aceptable. Sin embargo, este valor está muy influido por la clase mayoritaria, \text{Reuters}, que representa cerca de dos tercios de los artículos. De hecho, un clasificador muy simple que predijera siempre \text{Reuters} ya obtendría un *accuracy* relativamente alto, cercano al peso de esa clase en el conjunto de test, aunque no fuera capaz de reconocer correctamente los otros medios. Si el desbalance entre medios fuera aún mayor, este problema se acentuaría: el *accuracy* podría seguir siendo alto incluso si el modelo ignorara casi por completo a las clases minoritarias. Por eso, en problemas con clases desbalanceadas es necesario complementar el *accuracy* con la matriz de confusión y con métricas por clase como *precision*, *recall* y *f1-score*.
+Esto muestra por qué mirar solo el *accuracy* puede ser engañoso. El modelo alcanza un *accuracy* de 0.721, que a primera vista parece aceptable, pero está dominado por la clase mayoritaria: \texttt{Reuters} concentra cerca de dos tercios de los artículos, de modo que un clasificador trivial que siempre predijera \texttt{Reuters} obtendría un valor similar sin reconocer a los demás medios. Con un desbalance aún mayor el problema se agravaría. Por eso, en problemas con clases desbalanceadas conviene complementar el *accuracy* con la matriz de confusión y con métricas por clase como *precision*, *recall* y *F1-score*.
 
 ## 2. Validación cruzada y búsqueda de hiperparámetros
 
 
-La técnica de validación cruzada permite evaluar el desempeño del modelo de una forma más robusta que una única partición entre entrenamiento y validación. Para ello, el conjunto de entrenamiento se divide en varios pliegues o *folds*: en cada iteración, el modelo se entrena con una parte de los datos y se valida con el pliegue restante. Luego, se promedian los resultados obtenidos en las distintas iteraciones. De esta forma, se reduce la dependencia del resultado respecto de una única partición de los datos y se obtiene una estimación más estable del desempeño esperado del modelo. La cantidad de pliegues que usada en este caso es 5 y el orden de las palabras es mezclado previamente.
+La validación cruzada permite estimar el desempeño de forma más robusta que con una única partición de validación: el conjunto de entrenamiento se divide en varios pliegues (*folds*) y, en cada iteración, se entrena con todos menos uno y se valida con el restante, promediando luego los resultados. Así se reduce la dependencia de una partición particular. Usamos 5 pliegues, con los datos mezclados previamente. El hiperparámetro a ajustar es *alpha*, que controla la intensidad del suavizado del Multinomial Naive Bayes y evita que un término ausente en una clase reciba probabilidad nula: valores chicos dejan al modelo más guiado por las frecuencias observadas, mientras que valores grandes suavizan más y vuelven las probabilidades más uniformes.
 
-El hiperparámetro a tunear es *alpha*, el cual define la intensidad del suavizado aplicado por el modelo Multinomial Naive Bayes. Este suavizado permite evitar que términos que no aparecen en una clase durante el entrenamiento reciban probabilidad nula. Valores pequeños de *alpha* implican poco suavizado, por lo que el modelo queda más influido por las frecuencias observadas en los datos. En cambio, valores más grandes aplican un suavizado más fuerte, haciendo que las probabilidades estimadas dependan menos de las frecuencias observadas y sean más uniformes entre términos.
+Se prueba una grilla de 9 valores en escala logarítmica (`[0.001, 0.00316, 0.01, 0.0316, 0.1, 0.316, 1, 3.16, 10]`), apropiada porque el efecto de *alpha* varía por órdenes de magnitud. Se excluye el 0, que equivale a no aplicar suavizado y puede generar probabilidades nulas en clasificación de texto. Para cada valor se entrena un modelo y se elige el mejor según su *accuracy* promedio.
 
-La grilla a utilizar cuenta con 9 valores: `[0.001, 0.00316, 0.01, 0.0316, 0.1, 0.316, 1, 3.16, 10]`. Estos valores fueron elegidos en escala logarítmica, ya que el efecto de *alpha* puede variar por órdenes de magnitud. Por este motivo, resulta más informativo comparar valores como `0.001`, `0.01`, `0.1`, `1` y `10` que utilizar una grilla equidistante. 
-
-No se ha incuido en la grilla el 0, ya que equivale a no aplicar suavizado, por lo que no es un valor recomendable. En problemas de clasificación de texto, donde muchas palabras pueden aparecer pocas veces o no aparecer en alguna clase, la ausencia de suavizado puede generar probabilidades nulas y volver al modelo menos robusto.
-
-Se ajusta un modelo Multinomial Naive Bayes para cada uno de los valores del hiperparámetro *alpha*, se comapran las métricas y se obtiene el mejor de ellos según su *accuracy*. 
-
-```{python}
-alphas = np.array([ 0.001, 0.00316, 0.01, 0.0316, 0.1, 0.316, 1, 3.16, 10]); #equivalente a alphas = np.logspace(-3, 1, 9)
+```{python, eval=FALSE}
+alphas = np.array([ 0.001, 0.00316, 0.01, 0.0316, 0.1, 0.316, 1]); #equivalente a alphas = np.logspace(-3, 1, 9)
 
 # from sklearn.model_selection import StratifiedKFold # agregar a 
 
@@ -962,7 +959,7 @@ grid_mnb = GridSearchCV(
     param_grid=param_grid_mnb,
     scoring="accuracy",
     cv=cv,
-    n_jobs=-1,
+    n_jobs=8,
     return_train_score=True
 );
 
@@ -977,7 +974,7 @@ grid_mnb.fit(X_train_model, y_train);
 ```
 
 
-```{python}
+```{python, eval=FALSE}
 #| label: fig-mnb-cv
 #| fig-cap: "Distribución del accuracy por valor de alpha Multinomial Naive Bayes con validación cruzada."
 #| fig-align: center
@@ -1070,10 +1067,10 @@ plt.tight_layout()
 plt.show()
 ```
 
-En la Figura \ref{fig-mnb-cv} se observa la distribución del *accuracy* del modelo para cada valor del hiperparámetro *alpha*. Los puntos negros representan el *accuracy* obtenido en cada uno de los pliegues, mientras que el rombo blanco muestra la media de estos en cada caso.
+La Figura \ref{fig-mnb-cv} muestra la distribución del *accuracy* por valor de *alpha*: cada punto negro es un pliegue y el rombo blanco, su media.
 
 
-```{python}
+```{python, eval=FALSE}
 #| results: asis
 
 tabla_resultados_mnb = (
@@ -1107,24 +1104,13 @@ print(
 )
 ```
 
-El mejor valor de *alpha* según el *accuracy* promedio es 0.0316, con un accuracy de 0.81. Aún así el valor 0.1 se desempeña prácticamente de la misma manera y cuenta con un desvío estándar menor, por lo que en algún caso podría preferirse este valor. Igualmente, todos los valores obtenidos para el desvío entándar son moderados, por lo que ambos valores son recomendables.
-
-En general, se observa que valores bajos de *alpha* tienden a desempeñarse mejor. Valores mayores que $0.1$ cuentan con un *accuracy* cada vez menor. Esto sugiere que un suavizado demasiado fuerte vuelve al modelo menos discriminativo. Al aumentar demasiado *alpha*, las probabilidades de las palabras se suavizan tanto que se pierde parte de la información útil que aportaban las frecuencias observadas en los textos.
-
-**Mejor modelo:**
-
-Con el valor de *alpha* más óptimo (0.0316) se obtiene 10% más de aciertos en validación cruzada que con el parámetro por defecto que usa la función _MultinomialNB_ (*alpha* = 1), el cual se usó anteriormente como primera aproximación al modelo Multinomial Naive Bayes, devolviendo los resultados mostrados en la Figura \ref{fig-cm-mnb}.
+El mejor valor según el *accuracy* promedio es *alpha* = 0.0316 (accuracy de 0.81), aunque 0.1 rinde casi igual y con menor desvío, por lo que también sería una opción razonable; en todos los casos el desvío entre pliegues es moderado. En general, los valores bajos de *alpha* funcionan mejor y a partir de 0.1 el *accuracy* cae: un suavizado demasiado fuerte uniformiza las probabilidades de las palabras y le hace perder al modelo la información de las frecuencias observadas. Frente al modelo base (*alpha* = 1, usado como primera aproximación en la Figura \ref{fig-cm-mnb}), este valor logra alrededor de un 10\% más de aciertos en validación cruzada.
 
 ## 3. Entrenamiento final con el mejor modelo
-Elija el mejor modelo (mejores parámetros) y vuelva a entrenar sobre todo el conjunto de entrenamiento disponible (sin quitar datos para validación).
-Reporte el valor final de las métricas y la matriz de confusión.
-Discuta las limitaciones de utilizar un modelo basado en *bag of words* o TF-IDF para el análisis de texto.
 
-Una vez seleccionado el mejor valor del hiperparámetro mediante validación cruzada, se entrena el modelo final utilizando el conjunto completo de entrenamiento. En este caso, el mejor valor encontrado fue `alpha = 0.0316`, que obtuvo el mayor accuracy promedio en validación cruzada.
+Con el mejor valor del hiperparámetro (`alpha = 0.0316`) se reentrena el modelo final sobre todo el conjunto de entrenamiento y se evalúa sobre el conjunto de test, que no se usó durante el ajuste, para obtener una estimación realista de su desempeño sobre datos no observados.
 
-Luego, el modelo final se evalúa sobre el conjunto de test, que no fue utilizado durante el ajuste de hiperparámetros. Esto permite obtener una estimación más realista de su desempeño predictivo sobre datos no observados.
-
-```{python}
+```{python, eval=FALSE}
 mejor_alpha = grid_mnb.best_params_["alpha"];
 
 # Entrenamiento final del modelo con el mejor alpha
@@ -1143,12 +1129,12 @@ accuracy_final_mnb = accuracy_score(y_test, y_pred_final_mnb);
 ```
 
 
-```{python}
+```{python, eval=FALSE}
 #| label: fig-mnb-matriz
 #| fig-cap: "Matriz de confusión normalizada por medio real para el modelo final Multinomial Naive Bayes."
 #| fig-align: center
 #| fig-pos: "H"
-
+#| out-width: "65%"
 
 # Matriz de confusión en cantidades absolutas
 cm_abs = confusion_matrix(
@@ -1195,9 +1181,9 @@ plt.tight_layout()
 plt.show()
 ```
 
-El modelo final Multinomial Naive Bayes, entrenado con `alpha = 0.0316`, alcanza un *accuracy* en test cercano a 0.82. La Figura \ref{fig-mnb-matriz} muestra una notable mejoría en la clasificación para los medios \text{CNBC} y \text{The New York Times} en comparación con el modelo ajustado anteriormente. Los artículos pertenecientes a \text{Reuters} siguen siendo los que clasifica mejor, aunque el porcentaje de predicciones correctas es menor para este medio en relación al modelo anterior. El medio \text{CNBC} continúa siendo el que en terminos relativos predice peor: se predicen erroneamente como pertenecientes a \text{Reuters} gran parte de sus artículos. Esto puede deberse al desbalance de datos, ya que este medio es el que cuenta con la menor cantidad de artículos de entre los tres, pero también a que una parte importante de los textos de \text{CNBC} comparte características léxicas o temáticas con \text{Reuters} según la representación TF-IDF utilizada.
+El modelo final alcanza un *accuracy* en test cercano a 0.82 y, como muestra la Figura \ref{fig-mnb-matriz}, mejora notablemente la clasificación de \texttt{CNBC} y \texttt{The New York Times} respecto del modelo base. \texttt{Reuters} sigue siendo el medio mejor clasificado, aunque ahora concentra menos predicciones. \texttt{CNBC} continúa siendo el más difícil: gran parte de sus artículos se predicen como \texttt{Reuters}, algo atribuible tanto a su menor cantidad de artículos como a que comparte características léxicas con \texttt{Reuters} en la representación TF-IDF.
 
-```{python}
+```{python, eval=FALSE}
 #| results: asis
 
 reporte_final_mnb = classification_report(
@@ -1234,32 +1220,24 @@ print(
 )
 ```
 
-La Tabla \ref{metricas-final-mnb} complementa la lectura de la matriz de confusión al resumir, para cada medio, los valores de *precision*, *recall* y *F1-score*. En el caso de \text{CNBC}, el modelo obtiene una *precision* de 0.699 y un *recall* de 0.511. Esto significa que, de todos los artículos que el modelo predice como \text{CNBC}, aproximadamente el 69.9 % efectivamente pertenece a ese medio; y que, de todos los artículos reales de \text{CNBC}, el modelo logra recuperar el 51.1 %. Este último valor coincide con la diagonal de la matriz de confusión normalizada de la Figura \ref{fig-mnb-matriz}, donde se observa que 395 de los 773 artículos reales de \text{CNBC} fueron clasificados correctamente. El *F1-score* de 0.590 refleja este desempeño todavía limitado, aunque considerablemente mejor que el del modelo base.
+La Tabla \ref{tab:metricas-final-mnb} confirma esta lectura por clase. \texttt{Reuters} obtiene los mejores valores (*precision* 0.871, *recall* 0.897, *F1* 0.884), aunque todavía recibe 285 artículos de \texttt{CNBC} mal clasificados. \texttt{The New York Times} logra un *recall* alto (0.847; 714 de 843 artículos) con una *precision* algo menor (0.738), para un *F1* de 0.789. \texttt{CNBC}, en cambio, sigue siendo el más débil: recupera solo el 51.1 % de sus artículos (395 de 773), con una *precision* de 0.699 y un *F1* de 0.590, aunque mejora con claridad respecto del modelo base.
 
-Para \text{Reuters}, el modelo alcanza los mejores resultados generales: una *precision* de 0.871, un *recall* de 0.897 y un *F1-score* de 0.884. La matriz de confusión muestra que el 89.7 % de los artículos reales de Reuters fueron correctamente clasificados, lo que coincide con su *recall*. Además, la *precision* elevada indica que la mayoría de los artículos predichos como \text{Reuters} efectivamente pertenecen a ese medio. Aun así, esta clase sigue recibiendo una cantidad importante de errores provenientes de \text{CNBC}: 285 artículos reales de \text{CNBC} fueron clasificados como \text{Reuters}.
+En conjunto, el ajuste de *alpha* mejora el desempeño general y, sobre todo, la recuperación de las clases minoritarias, aunque persiste una confusión relevante entre \texttt{CNBC} y \texttt{Reuters}, que resultan las más difíciles de separar con este modelo.
 
-En el caso de \text{The New York Times}, el *recall* es alto, igual a 0.847, lo que indica que el modelo logra identificar correctamente la mayor parte de los artículos reales de este medio. Esto también se observa en la Figura \ref{fig-mnb-matriz}, donde 714 de 843 artículos reales aparecen en la diagonal. Su *precision*, de 0.738, es menor que su *recall*, lo que implica que dentro de los artículos predichos como \text{The New York Times\text{ hay una proporción no despreciable de textos que en realidad pertenecen a otros medios. El *F1-score* de 0.789 resume este balance entre una buena capacidad de recuperación y una *precision* más moderada.
+Esa confusión persistente se relaciona, en parte, con las limitaciones de representar el texto mediante *bag of words* o TF-IDF. Al modelar cada artículo como una bolsa de términos, estas técnicas ignoran el orden de las palabras y el contexto: dos frases de sentido distinto pueden quedar con representaciones casi idénticas, y se pierden negaciones, relaciones sintácticas o dependencias de largo alcance. Además, al basarse en coincidencias superficiales de vocabulario, tienden a dar peso a marcas de estilo, formato o edición —firmas, fórmulas periodísticas, nombres recurrentes— más que a diferencias temáticas profundas; algo especialmente relevante aquí, donde los medios se distinguen tanto por sus temas como por sus convenciones de redacción, como se vio con las plantillas de \texttt{Reuters}.
 
-En conjunto, la Tabla\ref{metricas-final-mnb} confirma la mejora del modelo final respecto del Multinomial Naive Bayes base. El ajuste de *alpha* permite que el modelo deje de concentrar casi todas sus predicciones en Reuters y mejore especialmente el *recall* de CNBC y The New York Times. Sin embargo, las métricas también muestran que la clasificación no es igualmente buena para todos los medios: Reuters sigue siendo la clase mejor resuelta, mientras que CNBC continúa siendo la más difícil, tanto por su menor *recall* como por su *F1-score* más bajo.
-
-En conclusión, al comparar comparar con el modelo Multinomial Naive Bayes base, el ajuste del hiperparámetro *alpha* permite mejorar el desempeño general y, en particular, la recuperación de las clases minoritarias. Sin embargo, persisten confusiones relevantes entre \text{CNBC} y \text{Reuters}, lo que sugiere que estas clases son más difíciles de separar mediante este modelo.
-
-**limitaciones de usar Bag of Words o TF-IDF:**
-
-Una limitación importante de los modelos basados en Bag of Words o TF-IDF es que representan los textos como bolsas de términos, por lo que ignoran el orden de las palabras y buena parte del contexto lingüístico. Dos frases con sentidos distintos pueden terminar teniendo representaciones muy parecidas si contienen las mismas palabras. Por ejemplo, estas técnicas no capturan bien negaciones, relaciones sintácticas, ironía, tono ni dependencias de largo alcance entre términos.
-
-Otra limitación es que estas representaciones trabajan principalmente con coincidencias superficiales de vocabulario. En consecuencia, pueden asignar mucho peso a marcas de estilo, formato o edición, como firmas, fórmulas periodísticas, nombres propios recurrentes o expresiones típicas de un medio, aunque esas palabras no representen necesariamente diferencias temáticas profundas. En este trabajo, esto es especialmente relevante porque los medios pueden distinguirse no solo por los temas que cubren, sino también por convenciones de redacción, plantillas editoriales y formas de citar fuentes.
-
-Además, tanto Bag of Words como TF-IDF generan matrices de muy alta dimensionalidad y muy dispersas: cada palabra o n-grama se convierte en una variable, pero cada artículo utiliza solo una pequeña parte del vocabulario total. Esto puede volver al modelo sensible a términos raros, errores de limpieza, variantes morfológicas o expresiones poco frecuentes. Aunque TF-IDF reduce el peso de palabras demasiado comunes y destaca términos más distintivos, sigue sin comprender el significado semántico de las palabras ni la similitud entre términos relacionados.
-
-Por estas razones, los resultados obtenidos deben interpretarse como la capacidad del modelo para explotar patrones léxicos presentes en los textos, más que como una comprensión profunda del contenido periodístico. Técnicas más avanzadas, como embeddings de palabras o modelos basados en transformers, podrían capturar relaciones semánticas y contextuales más ricas, aunque a costa de mayor complejidad computacional y menor interpretabilidad directa.
+A esto se suma que ambas representaciones generan matrices de muy alta dimensión y dispersas, lo que vuelve al modelo sensible a términos raros, errores de limpieza o variantes morfológicas; y aunque TF-IDF atenúa el peso de las palabras más comunes, no captura el significado de los términos ni la similitud entre palabras relacionadas. Por eso conviene leer estos resultados como la capacidad del modelo para explotar patrones léxicos, y no como una comprensión real del contenido. Técnicas más avanzadas, como *embeddings* o modelos basados en *transformers*, capturarían relaciones semánticas y contextuales más ricas, a costa de mayor complejidad computacional y menor interpretabilidad.
 
 
 
 
-## 4. Modelo alternativo
-Evalúe al menos un modelo más (dentro de scikit-learn) aparte de *Multinomial Naive Bayes* para clasificar el texto utilizando las mismas *features* de texto.
-Explique brevemente cómo funciona y compare los resultados con el anterior.
+## 4. Modelo alternativo: regresión logística multinomial
+
+Como modelo alternativo al Multinomial Naive Bayes se entrena una **regresión logística multinomial**, utilizando exactamente las mismas *features* TF-IDF —sin *stop words* ni referencias directas a los medios— de modo que la comparación entre ambos métodos sea justa.
+
+Ambos son clasificadores lineales y probabilísticos, pero parten de enfoques opuestos. El Multinomial Naive Bayes estima cómo se generan las palabras dentro de cada medio y, asumiendo que dada la clase las palabras son independientes entre sí, aplica el teorema de Bayes para obtener la probabilidad de cada medio. La regresión logística, en cambio, modela directamente la probabilidad de cada medio dado el texto, sin postular un mecanismo de generación de las palabras. Para ello asigna a cada palabra un coeficiente por medio, combina linealmente esos coeficientes con los valores TF-IDF del artículo y transforma el resultado en probabilidades mediante la función *softmax*, que reparte la probabilidad entre los tres medios de forma que sumen uno; el medio con mayor probabilidad es el predicho. Al no asumir independencia entre palabras, la regresión logística puede repartir el peso entre términos que tienden a aparecer juntos, en lugar de tratarlos como evidencia separada como sí lo hace Naive Bayes.
+
+Un aspecto central en este problema es la **cantidad de variables**: aun tras quitar las *stop words* y las referencias a los medios, el vocabulario supera las 80.000 palabras, muchas más que los 10.262 artículos de entrenamiento. En este caso, con muchas más variables que observaciones, la regresión logística puede presentar problemas para la estimación de los parametros. Para evitarlo se incorpora un término de **regularización** que penaliza los coeficientes grandes y mantiene el modelo más simple. La implementación de scikit-learn aplica por defecto una penalización **L2 (Ridge)**, controlada por el hiperparámetro $C$ (el inverso de la fuerza de regularización): valores chicos de $C$ penalizan con más fuerza y encogen los coeficientes, mientras que valores grandes dejan al modelo más libre. En este ajuste se utiliza el valor por defecto, $C=1$, junto con la penalización L2.
 
 ```{python}
 # Regresión logística multinomial con regularización L2 (por defecto en sklearn),
@@ -1278,6 +1256,7 @@ acc_lr = accuracy_score(y_test, y_pred_lr);
 #| fig-cap: "Matriz de confusión de la regresión logística multinomial sobre el conjunto de test."
 #| fig-align: center
 #| fig-pos: "H"
+#| out-width: "65%"
 
 # Matriz de confusión en cantidades absolutas
 cm_abs_lr = confusion_matrix(
@@ -1367,7 +1346,7 @@ print(
 )
 ```
 
-Una ventaja de la regresión logística frente al Naive Bayes es que sus coeficientes son fácilmente interpretables. La matriz `logreg.coef_` tiene una fila por medio y una columna por palabra, y el coeficiente asociado a cada palabra indica cuánto empuja su presencia la predicción hacia ese medio. En la Figura \ref{fig-coef-logreg} se muestran, para cada medio, las palabras con mayor coeficiente positivo, es decir, las más relevantes a la hora de clasificar.
+Una ventaja de la regresión logística frente al Naive Bayes es que sus coeficientes son fácilmente interpretables. Los coeficiente asociado a cada palabra indica cuánto empuja su presencia la predicción hacia ese medio. En la Figura \ref{fig-coef-logreg} se muestran, para cada medio, las palabras con mayor coeficiente positivo, es decir, las más relevantes a la hora de clasificar.
 
 ```{python}
 #| label: fig-coef-logreg
@@ -1399,13 +1378,11 @@ plt.show()
 
 Lo que más llama la atención es que, **aun habiendo quitado las stop words y los nombres de los medios**, casi ninguna de las palabras más influyentes es temática: el modelo se apoya sobre todo en marcas de estilo y de formato. \texttt{Reuters} se reconoce por el formato de sus cables (*editing*, *reporting*, *text*, *source*, *writing*, *newsroom*) y por rastros de su estructura interna (*corp*, *bengaluru*, sede de una de sus redacciones). \texttt{The New York Times} se identifica por sus honoríficos característicos (*mr*, *ms*, *dr*) y por vocabulario editorial (*article*, *editor*, *newsletter*). \texttt{CNBC}, en cambio, aparece asociado a contracciones del inglés informal (*don*, *ve*, *ll*, *didn*, fragmentos de "don't", "I've", etc.) y a algunos nombres y temas propios (*ceo*, *trump*, *china*, *cramer*, conductor del canal).
 
-El resultado es revelador: eliminar las referencias directas al medio no alcanzó para forzar al modelo a fijarse en el contenido. La señal más fuerte sigue proviniendo del estilo y el formato (plantillas de redacción, honoríficos, contracciones) e incluso de entidades muy asociadas a cada medio (su sede, sus conductores), además de artefactos de la propia limpieza, como las contracciones partidas al eliminar los apóstrofes. En otras palabras, el clasificador aprende a distinguir *cómo* y *quién* escribe antes que *de qué* se habla. Para medir la verdadera capacidad de diferenciar medios por su temática habría que seguir limpiando estas marcas, y es esperable que la tarea se vuelva entonces bastante más difícil.
-
-Por último, vale la pena ver el rol de la **regularización**, que es lo que controla cuánto peso puede tomar cada palabra. La Figura \ref{fig-path} ilustra, sobre un vocabulario reducido a 400 términos para que el cálculo sea rápido, cómo evolucionan los coeficientes de algunas palabras a medida que se afloja la penalización (es decir, al aumentar $C$, el inverso de la fuerza de regularización), comparando las penalizaciones L2 (*Ridge*) y L1 (*Lasso*).
+Por último, la Figura \ref{fig-path} muestra, sobre un vocabulario reducido a 400 términos para agilizar el cálculo, cómo cambian los coeficientes de algunas palabras al variar la **regularización** L2 (*Ridge*) que usa el modelo, es decir, al mover el parámetro $C$.
 
 ```{python}
 #| label: fig-path
-#| fig-cap: "Trayectoria de los coeficientes de algunas palabras al variar la regularización, con penalización L2 (Ridge) y L1 (Lasso), sobre un vocabulario reducido."
+#| fig-cap: "Trayectoria de los coeficientes de algunas palabras al variar la regularización L2 (Ridge), sobre un vocabulario reducido."
 #| fig-align: center
 #| fig-pos: "H"
 
@@ -1421,63 +1398,138 @@ seguir = {
 seguir = {w: m for w, m in seguir.items() if w in vocab}
 
 Cs = np.logspace(-2, 2, 9)
-paths = {pen: {w: [] for w in seguir} for pen in ["l2", "l1"]}
-for pen in ["l2", "l1"]:
-    for C in Cs:
-        ovr = OneVsRestClassifier(
-            LogisticRegression(penalty=pen, solver="liblinear", C=C, max_iter=2000)
-        ).fit(X_path, y_train)
-        clases = list(ovr.classes_)
-        for w, medio in seguir.items():
-            est = ovr.estimators_[clases.index(medio)]
-            paths[pen][w].append(est.coef_[0, vocab[w]])
-
-fig, axs = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
-for ax, pen, titulo in zip(axs, ["l2", "l1"], ["Ridge (L2)", "Lasso (L1)"]):
+paths = {w: [] for w in seguir}
+for C in Cs:
+    lr_path = LogisticRegression(penalty="l2", C=C, max_iter=2000).fit(X_path, y_train)
+    clases = list(lr_path.classes_)
     for w, medio in seguir.items():
-        ax.plot(Cs, paths[pen][w], marker="o", ms=3, color=colores[medio])
-        ax.annotate(
-            w, (Cs[-1], paths[pen][w][-1]),
-            fontsize=8, color=colores[medio],
-            xytext=(4, 0), textcoords="offset points"
-        )
-    ax.set_xscale("log")
-    ax.set_title(titulo)
-    ax.set_xlabel("C (inverso de la regularización)")
-    ax.axhline(0, color="gray", lw=0.6, ls="--")
-axs[0].set_ylabel("Coeficiente")
+        paths[w].append(lr_path.coef_[clases.index(medio), vocab[w]])
+
+fig, ax = plt.subplots(figsize=(7.5, 5))
+for w, medio in seguir.items():
+    ax.plot(Cs, paths[w], marker="o", ms=3, color=colores[medio])
+    ax.annotate(
+        w, (Cs[-1], paths[w][-1]),
+        fontsize=8, color=colores[medio],
+        xytext=(4, 0), textcoords="offset points"
+    )
+ax.set_xscale("log")
+ax.set_title("Ridge (L2)")
+ax.set_xlabel("C (inverso de la regularización)")
+ax.set_ylabel("Coeficiente")
+ax.axhline(0, color="gray", lw=0.6, ls="--")
 plt.tight_layout()
 plt.show()
 ```
 
-En ambos casos, cuando la regularización es fuerte (a la izquierda, con $C$ pequeño) todos los coeficientes se encogen hacia cero y el modelo resulta más simple; al aflojarla (hacia la derecha) cada palabra puede pesar más. La diferencia está en *cómo* lo hacen: con **L2 (Ridge)** los coeficientes se reducen de forma suave pero rara vez llegan a cero, mientras que con **L1 (Lasso)** las palabras menos informativas se "apagan", es decir, su coeficiente pasa a ser exactamente cero (se aprecia, por ejemplo, en *trump* y *china* bajo regularización fuerte), lo que produce un modelo más ralo que selecciona de forma automática las palabras más útiles.
+Las palabras seguidas no son casuales: son las mismas que ya habían aparecido con los coeficientes más altos en la Figura \ref{fig-coef-logreg} —*editing* y *reporting* para \texttt{Reuters}, *mr* y *ms* para \texttt{The New York Times}, *trump* y *china* para \texttt{CNBC}—. Con regularización fuerte (a la izquierda, con $C$ pequeño) todos los coeficientes se encogen hacia cero, pero al aflojarla (hacia la derecha, con $C$ grande) son justamente esas palabras las que más ganan peso. 
+
+**Comparación con el Multinomial Naive Bayes**
+
+Para cerrar, se comparan directamente los dos clasificadores entrenados sobre las mismas *features* TF-IDF: el modelo final Multinomial Naive Bayes (Sección 3, con `alpha = 0.0316`) y la regresión logística multinomial recién ajustada. El Cuadro \ref{tab:comparacion-modelos} resume su desempeño sobre el conjunto de test.
+
+```{python, eval=FALSE}
+#| results: asis
+
+filas = []
+for nombre, y_pred in [
+    ("Multinomial Naive Bayes", y_pred_final_mnb),
+    ("Regresión logística", y_pred_lr),
+]:
+    rep = classification_report(y_test, y_pred, output_dict=True)
+    filas.append({
+        "Modelo": nombre,
+        "Accuracy": f"{rep['accuracy']:.3f}",
+        "F1 CNBC": f"{rep['CNBC']['f1-score']:.3f}",
+        "F1 Reuters": f"{rep['Reuters']['f1-score']:.3f}",
+        "F1 NYT": f"{rep['The New York Times']['f1-score']:.3f}",
+        "F1 macro": f"{rep['macro avg']['f1-score']:.3f}",
+    })
+
+tabla_comp = pd.DataFrame(filas).set_index("Modelo")
+
+print(
+    tabla_comp.to_latex(
+        index=True,
+        escape=True,
+        caption="Comparación entre el modelo final Multinomial Naive Bayes y la regresión logística multinomial sobre el conjunto de test.",
+        label="tab:comparacion-modelos",
+        column_format="lccccc",
+        position="H"
+    ).replace(
+        "\\begin{table}[H]",
+        "\\begin{table}[H]\n\\centering\n\\small"
+    )
+)
+```
+
+La regresión logística supera al Multinomial Naive Bayes en *accuracy* (0.87 frente a 0.82) y, sobre todo, en el F1 promedio entre clases (0.81 frente a 0.76), que es la métrica más informativa dado el desbalance. La mejora alcanza a los tres medios: el F1 sube en \texttt{CNBC} (de 0.59 a 0.65), en \texttt{Reuters} (de 0.88 a 0.91) y en \texttt{The New York Times} (de 0.79 a 0.88).
+
+El cambio más claro aparece en la *precision* de las clases minoritarias. Mientras Naive Bayes tendía a sobre-asignar artículos a \texttt{Reuters}, la regresión logística es bastante más selectiva al predecir los otros medios: la *precision* de \texttt{CNBC} pasa de 0.70 a 0.86 y la de \texttt{The New York Times} de 0.74 a 0.94 (Tablas \ref{tab:metricas-final-mnb} y \ref{tab:metricas-logreg}). Esto es coherente con su naturaleza discriminativa: al no asumir independencia entre palabras, modela mejor el solapamiento de vocabulario entre medios y comete menos confusiones hacia la clase mayoritaria.
+
+Aun así, el patrón de fondo se mantiene: \texttt{CNBC} sigue siendo la clase más difícil para ambos modelos, con un *recall* en torno a 0.51, lo que confirma que buena parte de sus artículos comparten rasgos léxicos con \texttt{Reuters} y resultan difíciles de separar con representaciones TF-IDF, más allá del clasificador elegido. Esta confusión, de hecho, ya estaba anticipada por el análisis exploratorio: en el análisis de correspondencias (Figura \ref{fig-ca}) \texttt{Reuters} y \texttt{CNBC} aparecían contiguos y ligados al mismo vocabulario económico e internacional, y en la proyección SVD (Figura \ref{fig-centroides}) ambos compartían la franja de negocios del plano, en torno a la sección de mercados. Las matrices de confusión confirman, desde el lado del modelo, esa proximidad que ya era visible en los datos. En conjunto, la regresión logística ofrece un mejor desempeño global y un mejor equilibrio entre clases, a cambio de un mayor costo de entrenamiento y de la necesidad de regularizar para controlar la enorme cantidad de variables.
 
 ## 5. Cambio de medio de prensa
-Evalúe el problema cambiando al menos un medio de prensa.
-En particular, observe el (des)balance de datos y los problemas que pueda generar, así como cualquier indicio que pueda ver en el mapeo previo con PCA.
-Puede ser útil comentar acerca de técnicas como sobre-muestreo y submuestreo; no es necesario implementarlas.
+
+Para estudiar el efecto del desbalance de clases en un caso extremo, repetimos la clasificación reemplazando a \texttt{CNBC} por \texttt{Fox News}, un medio que en la base cuenta con apenas 227 artículos. El nuevo conjunto queda formado por \texttt{Reuters} (9.272 artículos), \texttt{The New York Times} (2.810) y \texttt{Fox News} (227), de modo que este último representa menos del 2\% del total. Se entrena la regresión logística —el mejor modelo de la sección anterior— con las mismas \textit{features} TF-IDF y partición estratificada.
 
 ```{python}
-# TODO: Seleccione una combinación diferente de tres medios de prensa (cambiando al menos uno)
-# y repita el proceso de entrenamiento y evaluación.
+#| label: fig-cm-cambio
+#| fig-cap: "Matriz de confusión (normalizada por medio real) de la regresión logística sobre el conjunto con Fox News como clase minoritaria."
+#| fig-align: center
+#| fig-pos: "H"
+#| out-width: "65%"
 
-# Analice el balance de clases en este nuevo conjunto de datos
-# ...
+medios_cambio = ["Reuters", "The New York Times", "Fox News"];
+df_cambio = df[df["publication"].isin(medios_cambio)].copy();
+df_cambio["CleanText"] = clean_text(df_cambio, "article");
+df_cambio = df_cambio.dropna(subset=["CleanText", "publication"]).copy();
+
+Xc = df_cambio["CleanText"];
+yc = df_cambio["publication"];
+Xc_tr, Xc_te, yc_tr, yc_te = train_test_split(
+    Xc, yc, test_size=0.3, random_state=33, stratify=yc
+);
+
+tfidf_cambio = TfidfVectorizer(stop_words=stopwords_modelo);
+Xc_tr_t = tfidf_cambio.fit_transform(Xc_tr);
+Xc_te_t = tfidf_cambio.transform(Xc_te);
+
+logreg_cambio = LogisticRegression(max_iter=1000, C=1.0);
+logreg_cambio.fit(Xc_tr_t, yc_tr);
+yc_pred = logreg_cambio.predict(Xc_te_t);
+
+acc_cambio = accuracy_score(yc_te, yc_pred);
+
+cm_abs = confusion_matrix(yc_te, yc_pred, labels=medios_cambio);
+cm_pct = cm_abs / cm_abs.sum(axis=1, keepdims=True) * 100;
+annot = np.empty_like(cm_abs).astype(str);
+for i in range(cm_abs.shape[0]):
+    for j in range(cm_abs.shape[1]):
+        annot[i, j] = f"{cm_abs[i, j]}\n({cm_pct[i, j]:.1f}%)"
+
+fig, ax = plt.subplots(figsize=(7, 5));
+sns.heatmap(
+    cm_pct, annot=annot, fmt="", cmap="Blues",
+    xticklabels=medios_cambio, yticklabels=medios_cambio,
+    vmin=0, vmax=100, cbar_kws={"label": "Porcentaje dentro del medio real (%)"},
+    linewidths=0.5, linecolor="white", ax=ax,
+);
+ax.set_xlabel("Predicción");
+ax.set_ylabel("Medio real");
+ax.set_title(f"Regresión logística con Fox News\nAccuracy test = {acc_cambio:.3f}");
+plt.xticks(rotation=45, ha="right");
+plt.yticks(rotation=0);
+plt.tight_layout();
+plt.show();
 ```
+
+A primera vista el modelo parece excelente, con un *accuracy* de 0.95, pero ese valor está completamente dominado por \texttt{Reuters}: un clasificador que predijera siempre \texttt{Reuters} ya obtendría 0.75. La matriz de confusión revela el verdadero problema. De los 68 artículos de \texttt{Fox News} en el test, el modelo reconoce solo 24 (un *recall* de 0.35) y manda 33 a \texttt{Reuters}; su *precision* es 1.0 cuando se anima a predecir \texttt{Fox News} acierta, pero casi nunca elige esa clase. La métrica más honesta es la *macro-F1* (0.80), que promedia las clases sin ponderar por su tamaño y por eso refleja el mal desempeño en la clase minoritaria. Ante la duda, el modelo se inclina por la clase mayoritaria, que es la que minimiza el error global.
+
+Conviene aclarar que la partición estratificada solo garantiza que la proporción de cada clase sea la misma en train y test, pero no corrige el desbalance en sí. Para atacarlo existen dos familias de técnicas de remuestreo. El **submuestreo** (*undersampling*) descarta artículos de la clase mayoritaria hasta equilibrar las clases, con el costo de tirar información potencialmente útil. El **sobremuestreo** (*oversampling*) hace lo contrario: replica o genera sintéticamente ejemplos de la clase minoritaria, con el riesgo de sobreajustar a unos pocos textos repetidos.
 
 ## 6. Técnica alternativa de extracción de features
-Busque información sobre al menos una técnica alternativa de extraer *features* de texto.
-Explique brevemente cómo funciona y qué tipo de diferencias esperaría en los resultados.
-No se espera que implemente nada en esta parte.
 
-*TODO: Escriba su análisis en el informe.*
+Una de las limitaciones de *bag of words* y TF-IDF que ya señalamos es que representan cada palabra de forma aislada y dispersa: dos términos relacionados por ejemplo, sinónimos ocupan dimensiones distintas y el modelo no tiene forma de saber que significan algo parecido. Una alternativa que ataca este problema son los **word embeddings**, que representan cada palabra mediante un vector **denso** y de baja dimensión aprendido a partir del contexto en que la palabra suele aparecer. La idea, conocida como *hipótesis distribucional*, es que las palabras que aparecen en contextos similares reciben vectores similares; así, los términos relacionados quedan próximos en el espacio y la representación captura cierta noción de significado y de sinonimia. Métodos clásicos para obtenerlos son *Word2Vec*.
 
-## 7. Opcional: Clasificación a nivel de título
-Repita la clasificación con los tres medios de prensa originales, pero esta vez clasificando a nivel de **título** en lugar de artículo completo.
-
-```{python}
-# Opcional: Repita el pipeline de clasificación utilizando el título del artículo
-# en lugar del cuerpo del texto.
-
-```
-
+En cuanto a los resultados, sería esperable que un clasificador basado en *embeddings* dependa menos de la coincidencia exacta de palabras y más del contenido: podría reconocer como parecidos dos artículos que tratan el mismo tema aunque usen vocabulario distinto, algo que TF-IDF no logra. Para clasificar un artículo completo habría que combinar los vectores de sus palabras (por ejemplo, promediándolos) en un único vector de documento. Un paso más allá están los *embeddings contextuales* de los modelos basados en *transformers*, donde la representación de una palabra cambia según la oración, capturando también el orden y el contexto que *bag of words* descarta. A cambio de esa mayor riqueza, estas técnicas son más costosas y bastante menos interpretables que los coeficientes por palabra que pudimos analizar en este trabajo.
