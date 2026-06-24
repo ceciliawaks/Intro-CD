@@ -21,12 +21,12 @@ execute:
 ```{r}
 library(reticulate)
 
-use_python(
-   "C:/Users/facur/anaconda3/envs/fertcast/python.exe",
-   required = TRUE
- )
+# use_python(
+#    "C:/Users/facur/anaconda3/envs/fertcast/python.exe",
+#    required = TRUE
+#  )
 
-#Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
+Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
 
 ```
 
@@ -45,8 +45,7 @@ import prince
 from adjustText import adjust_text
 
 from datasets import load_dataset
-
-from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score, StratifiedKFold
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer, ENGLISH_STOP_WORDS
 from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.naive_bayes import MultinomialNB
@@ -330,7 +329,7 @@ Para verificar que la estratificación efectivamente preservó el balance origin
 #| fig-align: center
 #| fig-pos: "H"
 
-orden_medios = y.value_counts().index
+orden_medios = y.value_counts().index;
 
 dist_df = pd.concat(
     [
@@ -339,28 +338,28 @@ dist_df = pd.concat(
         y_test.value_counts(normalize=True),
     ],
     axis=1,
-)
-dist_df.columns = ["Total", "Train", "Test"]
+);
+dist_df.columns = ["Total", "Train", "Test"];
 dist_df = dist_df.loc[orden_medios] * 100
 
-fig, ax = plt.subplots(figsize=(9, 5))
+fig, ax = plt.subplots(figsize=(9, 5));
 dist_df.plot(
     kind="bar",
     ax=ax,
     width=0.8,
     color=["#4c72b0", "#dd8452", "#55a868"],
-)
+);
 
-ax.set_xlabel("Medio de prensa", fontsize=12)
-ax.set_ylabel("Porcentaje de artículos", fontsize=12)
-ax.set_title("Balance de clases en train y test", fontsize=14, pad=12)
-ax.set_ylim(0, dist_df.values.max() * 1.18)
-ax.tick_params(axis="x", labelrotation=0, labelsize=11)
-ax.grid(axis="y", alpha=0.3)
-ax.legend(title="Conjunto", fontsize=10, title_fontsize=11)
+ax.set_xlabel("Medio de prensa", fontsize=12);
+ax.set_ylabel("Porcentaje de artículos", fontsize=12);
+ax.set_title("Balance de clases en train y test", fontsize=14, pad=12);
+ax.set_ylim(0, dist_df.values.max() * 1.18);
+ax.tick_params(axis="x", labelrotation=0, labelsize=11);
+ax.grid(axis="y", alpha=0.3);
+ax.legend(title="Conjunto", fontsize=10, title_fontsize=11);
 
 for contenedor in ax.containers:
-    ax.bar_label(contenedor, fmt="%.1f%%", padding=2, fontsize=8)
+    ax.bar_label(contenedor, fmt="%.1f%%", padding=2, fontsize=8);
 
 plt.tight_layout()
 plt.show()
@@ -782,17 +781,14 @@ La figura confirma la lectura temática. La sección de mercados (*Markets*) se 
 # Parte 2: Entrenamiento y Evaluación de Modelos
 
 ## 1. Multinomial Naive Bayes
-Entrene el modelo *Multinomial Naive Bayes* para clasificar los artículos según a qué medio de prensa pertenece el texto.
-Utilice dicho modelo para clasificar los artículos del conjunto de test, y reporte el valor de *accuracy* y la **matriz de confusión**.
-Reporte además el valor de *precision* y *recall* para cada medio.
-Explique cómo se relacionan estos valores con la matriz anterior.
-
-¿Qué problemas puede tener el hecho de mirar solamente el valor de *accuracy*?
-Considere qué sucedería con esta métrica si el desbalance de datos fuera aún mayor entre medios.
-
-**Sugerencia**: utilice el método `from_predictions` de `ConfusionMatrixDisplay` para realizar la matriz.
 
 A diferencia de la Parte 1, donde se trabajó con el TF-IDF base, para entrenar los modelos partimos de una representación que elimina las *stop words* y, además, las **referencias directas a los medios**: su propio nombre, el de su empresa matriz y los dominios web. Esta decisión está motivada por las pistas detectadas en la Tarea 1, y busca evitar que el clasificador aproveche menciones explícitas del propio medio en lugar de aprender de su contenido.
+
+Se entrena entonces un modelo Multinomial Naive Bayes base, el cual define sus parámetros con valores por defecto de la función _MultinomialNB_, por lo que en este caso el parámetro *alpha* toma el valor 1 (en secciones siguientes se profundiza sobre este parámetro).
+
+Se obtiene el *accuracy* del modelo y distintas medidas del desempeño en las predicciones para cada uno de los medios de prensa y presentamos la respectiva matriz de confusión.
+
+$$\text{accuracy}=\frac{\text{Cantidad de predicciones correctas}}{\text{Cantidad ttal de predicciones}}$$
 
 ```{python}
 # Features para los modelos: TF-IDF eliminando stop words y referencias directas a los medios
@@ -810,13 +806,13 @@ X_test_model = tfidf_model.transform(X_test)
 
 ```{python}
 # Entrenamiento del modelo y predicción sobre el conjunto de test
-mnb = MultinomialNB()
-mnb.fit(X_train_model, y_train)
+mnb = MultinomialNB();
+mnb.fit(X_train_model, y_train);
 
-y_pred_mnb = mnb.predict(X_test_model)
+y_pred_mnb = mnb.predict(X_test_model);
 
-acc_mnb = accuracy_score(y_test, y_pred_mnb)
-print(f"Accuracy en test: {acc_mnb:.3f}")
+acc_mnb = accuracy_score(y_test, y_pred_mnb);
+#print(f"Accuracy en test: {acc_mnb:.3f}")
 ```
 
 ```{python}
@@ -825,20 +821,58 @@ print(f"Accuracy en test: {acc_mnb:.3f}")
 #| fig-align: center
 #| fig-pos: "H"
 
-fig, ax = plt.subplots(figsize=(5.5, 4.5))
-ConfusionMatrixDisplay.from_predictions(
+# Matriz de confusión en cantidades absolutas
+cm_abs = confusion_matrix(
     y_test,
     y_pred_mnb,
-    ax=ax,
+    labels=mnb.classes_
+);
+
+# Normalización por fila:
+# cada fila representa el 100% de los artículos reales de ese medio
+cm_pct = cm_abs / cm_abs.sum(axis=1, keepdims=True) * 100;
+
+# Texto de cada celda: cantidad absoluta y porcentaje
+annot = np.empty_like(cm_abs).astype(str);
+
+for i in range(cm_abs.shape[0]):
+    for j in range(cm_abs.shape[1]):
+        annot[i, j] = f"{cm_abs[i, j]}\n({cm_pct[i, j]:.1f}%)"
+
+fig, ax = plt.subplots(figsize=(7.5, 5.8));
+
+sns.heatmap(
+    cm_pct,
+    annot=annot,
+    fmt="",
     cmap="Blues",
-    colorbar=False,
-    xticks_rotation=45
-)
-ax.set_xlabel("Predicción")
-ax.set_ylabel("Medio real")
+    xticklabels=mnb.classes_,
+    yticklabels=mnb.classes_,
+    vmin=0,
+    vmax=100,
+    cbar=True,
+    cbar_kws={"label": "Porcentaje dentro del medio real (%)"},
+    linewidths=0.5,
+    linecolor="white",
+    ax=ax
+);
+
+ax.set_xlabel("Predicción");
+ax.set_ylabel("Medio real");
+ax.set_title(f"Matriz de confusión - Multinomial Naive Bayes base\nAccuracy test = {acc_mnb:.3f}");
+
+plt.xticks(rotation=45, ha="right");
+plt.yticks(rotation=0);
+
 plt.tight_layout()
 plt.show()
+
+
 ```
+
+La matriz de difusión presentada en la Figura \ref{fig-cm-mnb} expone en cada celda la cantidad de artículos predichos como pertenecientes al medio en la correspondiente columna, que pertenecen en la realidad al medio correspondiente a su fila. Además, se muestra a qué porcentaje de artículos dentro del medio real corresponde esa cantidad.
+
+
 
 ```{python}
 #| results: asis
@@ -848,48 +882,380 @@ reporte_mnb = classification_report(
     y_pred_mnb,
     output_dict=True
 )
+
 tabla_mnb = (
-    pd.DataFrame(reporte_mnb).T
+    pd.DataFrame(reporte_mnb)
+    .T
     .loc[list(mnb.classes_), ["precision", "recall", "f1-score"]]
-    .round(3)
+    .rename(columns={
+        "precision": "Precision",
+        "recall": "Recall",
+        "f1-score": "F1-score"
+    })
 )
+
+tabla_mnb["Precision"] = tabla_mnb["Precision"].map(lambda x: f"{x:.3f}")
+tabla_mnb["Recall"] = tabla_mnb["Recall"].map(lambda x: f"{x:.3f}")
+tabla_mnb["F1-score"] = tabla_mnb["F1-score"].map(lambda x: f"{x:.3f}")
 
 latex_mnb = tabla_mnb.to_latex(
     index=True,
     escape=True,
     caption="Precision, recall y F1 por medio (Multinomial Naive Bayes).",
     label="tab:metricas-mnb",
-    column_format="lccc"
-)
-latex_mnb = latex_mnb.replace(
-    "\\begin{table}",
+    column_format="lccc",
+    position="H"
+).replace(
+    "\\begin{table}[H]",
     "\\begin{table}[H]\n\\centering"
 )
+
 print(latex_mnb)
 ```
 
+La métricas presentadas en la Tabla \ref{metricas-mn} se relacionan directamente con la matriz de confusión:
+
+- El *recall* de cada medio se lee por filas, ya que mide qué proporción de los artículos reales de ese medio fue correctamente clasificada. 
+- La *precision*, en cambio, se interpreta por columnas, porque mide qué proporción de los artículos predichos como un medio realmente pertenecía a ese medio. 
+- El *F1-score* resume ambas dimensiones mediante un promedio armónico, por lo que penaliza los casos en los que una de las dos métricas es alta pero la otra es muy baja.
+
+
+La Figura \ref{fig-cm-mnb} muestra que el modelo Multinomial Naive Bayes base tiende a predecir una gran proporción de artículos como \text{Reuters}. Esto se observa especialmente en la fila correspondiente a \text{CNBC}: de los 773 artículos reales de este medio, solo 16 son clasificados correctamente como \text{CNBC}, mientras que 744 son clasificados erróneamente como \text{Reuters}. En términos porcentuales, esto implica que el modelo solo recupera el 2.1 % de los artículos de \text{CNBC}. Por lo tanto, aunque la *precision* para este medio es igual a 1, este valor debe interpretarse con cuidado: todos los artículos que el modelo predijo como \text{CNBC} efectivamente pertenecían a \text{CNBC}, pero el modelo casi nunca eligió esta clase. Esto explica que el *recall* de \text{CNBC} sea muy bajo, igual a 0.021, y que su *F1-score* también sea bajo, igual a 0.041.
+
+Para \text{Reuters} ocurre lo contrario. La matriz de confusión muestra que el modelo clasifica correctamente 2769 de los 2782 artículos reales de \text{Reuters}, es decir, alcanza un *recall* de 0.995. Esto indica que casi todos los artículos de \text{Reuters} son identificados como tales. Sin embargo, la *precision* de \text{Reuter}s es menor, igual a 0.697, porque muchas predicciones de \text{Reuters} provienen en realidad de otros medios: 744 artículos de \text{CNBC} y 457 de \text{The New York Times} fueron clasificados erróneamente como \text{Reuters}. En este caso, el modelo tiene una alta capacidad para recuperar los artículos reales de \text{Reuters}, pero también asigna demasiados artículos de otras clases a esta categoría.
+
+En el caso de \text{The New York Times}, el modelo clasifica correctamente 386 de 843 artículos reales, lo que da un *recall* de 0.458. Es decir, logra identificar algo menos de la mitad de los artículos de este medio. La *precision*, en cambio, es alta, igual a 0.937, porque la mayoría de los artículos que el modelo predice como \text{The New York Times} efectivamente pertenecen a ese medio. Su *F1-score* de 0.615 refleja este comportamiento intermedio: el modelo es relativamente confiable cuando predice esta clase, pero deja sin recuperar una proporción importante de sus artículos reales.
+
+
+Mirar solamente el *accuracy* puede ser problemático. El modelo alcanza un *accuracy* de 0.721, lo que a primera vista podría sugerir un desempeño aceptable. Sin embargo, este valor está muy influido por la clase mayoritaria, \text{Reuters}, que representa cerca de dos tercios de los artículos. De hecho, un clasificador muy simple que predijera siempre \text{Reuters} ya obtendría un *accuracy* relativamente alto, cercano al peso de esa clase en el conjunto de test, aunque no fuera capaz de reconocer correctamente los otros medios. Si el desbalance entre medios fuera aún mayor, este problema se acentuaría: el *accuracy* podría seguir siendo alto incluso si el modelo ignorara casi por completo a las clases minoritarias. Por eso, en problemas con clases desbalanceadas es necesario complementar el *accuracy* con la matriz de confusión y con métricas por clase como *precision*, *recall* y *f1-score*.
+
+## 2. Validación cruzada y búsqueda de hiperparámetros
+
+
+La técnica de validación cruzada permite evaluar el desempeño del modelo de una forma más robusta que una única partición entre entrenamiento y validación. Para ello, el conjunto de entrenamiento se divide en varios pliegues o *folds*: en cada iteración, el modelo se entrena con una parte de los datos y se valida con el pliegue restante. Luego, se promedian los resultados obtenidos en las distintas iteraciones. De esta forma, se reduce la dependencia del resultado respecto de una única partición de los datos y se obtiene una estimación más estable del desempeño esperado del modelo. La cantidad de pliegues que usada en este caso es 5 y el orden de las palabras es mezclado previamente.
+
+El hiperparámetro a tunear es *alpha*, el cual define la intensidad del suavizado aplicado por el modelo Multinomial Naive Bayes. Este suavizado permite evitar que términos que no aparecen en una clase durante el entrenamiento reciban probabilidad nula. Valores pequeños de *alpha* implican poco suavizado, por lo que el modelo queda más influido por las frecuencias observadas en los datos. En cambio, valores más grandes aplican un suavizado más fuerte, haciendo que las probabilidades estimadas dependan menos de las frecuencias observadas y sean más uniformes entre términos.
+
+La grilla a utilizar cuenta con 9 valores: `[0.001, 0.00316, 0.01, 0.0316, 0.1, 0.316, 1, 3.16, 10]`. Estos valores fueron elegidos en escala logarítmica, ya que el efecto de *alpha* puede variar por órdenes de magnitud. Por este motivo, resulta más informativo comparar valores como `0.001`, `0.01`, `0.1`, `1` y `10` que utilizar una grilla equidistante. 
+
+No se ha incuido en la grilla el 0, ya que equivale a no aplicar suavizado, por lo que no es un valor recomendable. En problemas de clasificación de texto, donde muchas palabras pueden aparecer pocas veces o no aparecer en alguna clase, la ausencia de suavizado puede generar probabilidades nulas y volver al modelo menos robusto.
+
+Se ajusta un modelo Multinomial Naive Bayes para cada uno de los valores del hiperparámetro *alpha*, se comapran las métricas y se obtiene el mejor de ellos según su *accuracy*. 
+
 ```{python}
-# TODO: Genere una visualización (por ejemplo, gráfico de violín) que compare
-# la accuracy de los distintos modelos entrenados en GridSearchCV,
-# mostrando la variabilidad en los distintos splits.
+alphas = np.array([ 0.001, 0.00316, 0.01, 0.0316, 0.1, 0.316, 1, 3.16, 10]); #equivalente a alphas = np.logspace(-3, 1, 9)
+
+# from sklearn.model_selection import StratifiedKFold # agregar a 
+
+param_grid_mnb = {
+    "alpha": alphas
+};
+
+cv = StratifiedKFold(
+    n_splits=5,
+    shuffle=True,
+    random_state=123
+);
+
+grid_mnb = GridSearchCV(
+    estimator=MultinomialNB(),
+    param_grid=param_grid_mnb,
+    scoring="accuracy",
+    cv=cv,
+    n_jobs=-1,
+    return_train_score=True
+);
+
+grid_mnb.fit(X_train_model, y_train);
+
+#print("Mejor alpha:", grid_mnb.best_params_["alpha"])
+#print(f"Mejor accuracy promedio en CV: {grid_mnb.best_score_:.3f}")
+
+#Mejor alpha: 0.0316
+#Mejor accuracy promedio en CV: 0.817
 
 ```
+
+
+```{python}
+#| label: fig-mnb-cv
+#| fig-cap: "Distribución del accuracy por valor de alpha Multinomial Naive Bayes con validación cruzada."
+#| fig-align: center
+#| fig-pos: "H"
+
+# Resultados de la validación cruzada
+resultados_cv = pd.DataFrame(grid_mnb.cv_results_)
+
+# Pasamos de formato ancho a formato largo:
+# una fila por combinación de alpha y split de validación cruzada.
+split_cols = [
+    col for col in resultados_cv.columns
+    if col.startswith("split") and col.endswith("_test_score")
+]
+
+resultados_largos = resultados_cv.melt(
+    id_vars=["param_alpha", "mean_test_score", "std_test_score", "rank_test_score"],
+    value_vars=split_cols,
+    var_name="split",
+    value_name="accuracy"
+)
+
+resultados_largos["alpha"] = resultados_largos["param_alpha"].astype(float)
+resultados_largos["alpha_label"] = resultados_largos["alpha"].map(lambda x: f"{x:.4g}")
+
+# Ordenamos las etiquetas según el valor numérico de alpha
+orden_alpha = (
+    resultados_largos[["alpha", "alpha_label"]]
+    .drop_duplicates()
+    .sort_values("alpha")["alpha_label"]
+    .tolist()
+)
+
+
+fig, ax = plt.subplots(figsize=(10, 5.8))
+
+# Violines: distribución de accuracy entre folds para cada alpha
+sns.violinplot(
+    data=resultados_largos,
+    x="alpha_label",
+    y="accuracy",
+    order=orden_alpha,
+    palette="viridis",
+    inner=None,
+    linewidth=1.1,
+    cut=0,
+    ax=ax
+)
+
+# Puntos individuales: resultado de cada fold
+sns.stripplot(
+    data=resultados_largos,
+    x="alpha_label",
+    y="accuracy",
+    order=orden_alpha,
+    color="black",
+    size=4,
+    alpha=0.65,
+    jitter=0.12,
+    ax=ax
+)
+
+# Promedio de accuracy para cada alpha
+sns.pointplot(
+    data=resultados_largos,
+    x="alpha_label",
+    y="accuracy",
+    order=orden_alpha,
+    estimator="mean",
+    errorbar=None,
+    color="white",
+    markers="D",
+    linestyles="",
+    markersize=4,
+    ax=ax
+)
+
+
+# Formato general
+ax.set_xlabel("alpha")
+ax.set_ylabel("Accuracy")
+ax.set_title("Accuracy según alpha en Multinomial Naive Bayes CV")
+
+ax.tick_params(axis="x")
+ax.grid(axis="y", linestyle="--", alpha=0.35)
+ax.set_axisbelow(True)
+
+
+plt.tight_layout()
+plt.show()
+```
+
+En la Figura \ref{fig-mnb-cv} se observa la distribución del *accuracy* del modelo para cada valor del hiperparámetro *alpha*. Los puntos negros representan el *accuracy* obtenido en cada uno de los pliegues, mientras que el rombo blanco muestra la media de estos en cada caso.
+
+
+```{python}
+#| results: asis
+
+tabla_resultados_mnb = (
+    resultados_cv[["param_alpha", "mean_test_score", "std_test_score", "rank_test_score"]]
+    .rename(columns={
+        "param_alpha": "Alpha",
+        "mean_test_score": "Accuracy promedio",
+        "std_test_score": "Desvío estándar",
+        "rank_test_score": "Ranking"
+    })
+    .sort_values("Ranking")
+)
+
+# Redondeamos para que la tabla quede más limpia
+tabla_resultados_mnb["Alpha"] = tabla_resultados_mnb["Alpha"].map(lambda x: f"{x:.5g}")
+#tabla_resultados_mnb["Alpha"] = tabla_resultados_mnb["Alpha"].astype(float)
+tabla_resultados_mnb["Accuracy promedio"] = tabla_resultados_mnb["Accuracy promedio"].map(lambda x: f"{x:.3f}")
+tabla_resultados_mnb["Desvío estándar"] = tabla_resultados_mnb["Desvío estándar"].map(lambda x: f"{x:.3f}")
+
+print(
+    tabla_resultados_mnb.to_latex(
+        index=False,
+        caption="Resultados de validación cruzada para distintos valores de alpha en Multinomial Naive Bayes.",
+        label="tab:cv-alpha-mnb",
+        position="H",
+        escape=False
+    ).replace(
+        "\\begin{table}[H]",
+        "\\begin{table}[H]\n\\centering"
+    )
+)
+```
+
+El mejor valor de *alpha* según el *accuracy* promedio es 0.0316, con un accuracy de 0.81. Aún así el valor 0.1 se desempeña prácticamente de la misma manera y cuenta con un desvío estándar menor, por lo que en algún caso podría preferirse este valor. Igualmente, todos los valores obtenidos para el desvío entándar son moderados, por lo que ambos valores son recomendables.
+
+En general, se observa que valores bajos de *alpha* tienden a desempeñarse mejor. Valores mayores que $0.1$ cuentan con un *accuracy* cada vez menor. Esto sugiere que un suavizado demasiado fuerte vuelve al modelo menos discriminativo. Al aumentar demasiado *alpha*, las probabilidades de las palabras se suavizan tanto que se pierde parte de la información útil que aportaban las frecuencias observadas en los textos.
+
+**Mejor modelo:**
+
+Con el valor de *alpha* más óptimo (0.0316) se obtiene 10% más de aciertos en validación cruzada que con el parámetro por defecto que usa la función _MultinomialNB_ (*alpha* = 1), el cual se usó anteriormente como primera aproximación al modelo Multinomial Naive Bayes, devolviendo los resultados mostrados en la Figura \ref{fig-cm-mnb}.
 
 ## 3. Entrenamiento final con el mejor modelo
 Elija el mejor modelo (mejores parámetros) y vuelva a entrenar sobre todo el conjunto de entrenamiento disponible (sin quitar datos para validación).
 Reporte el valor final de las métricas y la matriz de confusión.
 Discuta las limitaciones de utilizar un modelo basado en *bag of words* o TF-IDF para el análisis de texto.
 
+Una vez seleccionado el mejor valor del hiperparámetro mediante validación cruzada, se entrena el modelo final utilizando el conjunto completo de entrenamiento. En este caso, el mejor valor encontrado fue `alpha = 0.0316`, que obtuvo el mayor accuracy promedio en validación cruzada.
 
-```{pyhton}
-# TODO: Entrene el mejor modelo sobre todo el conjunto de entrenamiento
+Luego, el modelo final se evalúa sobre el conjunto de test, que no fue utilizado durante el ajuste de hiperparámetros. Esto permite obtener una estimación más realista de su desempeño predictivo sobre datos no observados.
 
+```{python}
+mejor_alpha = grid_mnb.best_params_["alpha"];
+
+# Entrenamiento final del modelo con el mejor alpha
+modelo_final_mnb = MultinomialNB(alpha=mejor_alpha);
+
+modelo_final_mnb.fit(X_train_model, y_train);
+
+# Predicciones sobre el conjunto de test
+y_pred_final_mnb = modelo_final_mnb.predict(X_test_model);
+
+# Accuracy en test
+accuracy_final_mnb = accuracy_score(y_test, y_pred_final_mnb);
+
+#print(f"Mejor alpha: {mejor_alpha:.4g}")
+#print(f"Accuracy en test del modelo final: {accuracy_final_mnb:.3f}")
 ```
 
-```{pyhton}
-# TODO: Evalúe el mejor modelo sobre el conjunto de test y reporte métricas finales
 
+```{python}
+#| label: fig-mnb-matriz
+#| fig-cap: "Matriz de confusión normalizada por medio real para el modelo final Multinomial Naive Bayes."
+#| fig-align: center
+#| fig-pos: "H"
+
+
+# Matriz de confusión en cantidades absolutas
+cm_abs = confusion_matrix(
+    y_test,
+    y_pred_final_mnb,
+    labels=modelo_final_mnb.classes_
+);
+
+# Normalización por fila: porcentaje sobre el total real de cada medio
+cm_pct = cm_abs / cm_abs.sum(axis=1, keepdims=True) * 100;
+
+# Texto de cada celda: cantidad absoluta y porcentaje
+annot = np.empty_like(cm_abs).astype(str);
+
+for i in range(cm_abs.shape[0]):
+    for j in range(cm_abs.shape[1]):
+        annot[i, j] = f"{cm_abs[i, j]}\n({cm_pct[i, j]:.1f}%)"
+
+fig, ax = plt.subplots(figsize=(7.5, 5.8));
+
+sns.heatmap(
+    cm_pct,
+    annot=annot,
+    fmt="",
+    cmap="Blues",
+    xticklabels=modelo_final_mnb.classes_,
+    yticklabels=modelo_final_mnb.classes_,
+    vmin=0,
+    vmax=100,
+    cbar_kws={"label": "Porcentaje dentro del medio real (%)"},
+    linewidths=0.5,
+    linecolor="white",
+    ax=ax
+);
+
+ax.set_xlabel("Predicción");
+ax.set_ylabel("Medio real");
+ax.set_title(f"Matriz de confusión \nalpha = {mejor_alpha:.4g} - Accuracy test = {accuracy_final_mnb:.3f}");
+
+plt.xticks(rotation=45, ha="right");
+plt.yticks(rotation=0);
+
+plt.tight_layout()
+plt.show()
 ```
+
+El modelo final Multinomial Naive Bayes, entrenado con `alpha = 0.0316`, alcanza un *accuracy* en test cercano a 0.82. La Figura \ref{fig-mnb-matriz} muestra una notable mejoría en la clasificación para los medios \text{CNBC} y \text{The New York Times} en comparación con el modelo ajustado anteriormente. Los artículos pertenecientes a \text{Reuters} siguen siendo los que clasifica mejor, aunque el porcentaje de predicciones correctas es menor para este medio en relación al modelo anterior. El medio \text{CNBC} continúa siendo el que en terminos relativos predice peor: se predicen erroneamente como pertenecientes a \text{Reuters} gran parte de sus artículos. Esto puede deberse al desbalance de datos, ya que este medio es el que cuenta con la menor cantidad de artículos de entre los tres, pero también a que una parte importante de los textos de \text{CNBC} comparte características léxicas o temáticas con \text{Reuters} según la representación TF-IDF utilizada.
+
+```{python}
+#| results: asis
+
+reporte_final_mnb = classification_report(
+    y_test,
+    y_pred_final_mnb,
+    output_dict=True
+)
+
+tabla_metricas_final_mnb = (
+    pd.DataFrame(reporte_final_mnb)
+    .T
+    .loc[modelo_final_mnb.classes_, ["precision", "recall", "f1-score"]]
+    .rename(columns={
+        "precision": "Precision",
+        "recall": "Recall",
+        "f1-score": "F1-score"
+    })
+)
+
+tabla_metricas_final_mnb["Precision"] = tabla_metricas_final_mnb["Precision"].map(lambda x: f"{x:.3f}")
+tabla_metricas_final_mnb["Recall"] = tabla_metricas_final_mnb["Recall"].map(lambda x: f"{x:.3f}")
+tabla_metricas_final_mnb["F1-score"] = tabla_metricas_final_mnb["F1-score"].map(lambda x: f"{x:.3f}")
+
+print(
+    tabla_metricas_final_mnb.to_latex(
+        caption="Precision, recall y F1 por medio para el modelo final Multinomial Naive Bayes.",
+        label="tab:metricas-final-mnb",
+        position="H",
+        escape=False
+    ).replace(
+        "\\begin{table}[H]",
+        "\\begin{table}[H]\n\\centering"
+    )
+)
+```
+
+La Tabla \ref{metricas-final-mnb} complementa la lectura de la matriz de confusión al resumir, para cada medio, los valores de *precision*, *recall* y *F1-score*. En el caso de \text{CNBC}, el modelo obtiene una *precision* de 0.699 y un *recall* de 0.511. Esto significa que, de todos los artículos que el modelo predice como \text{CNBC}, aproximadamente el 69.9 % efectivamente pertenece a ese medio; y que, de todos los artículos reales de \text{CNBC}, el modelo logra recuperar el 51.1 %. Este último valor coincide con la diagonal de la matriz de confusión normalizada de la Figura \ref{fig-mnb-matriz}, donde se observa que 395 de los 773 artículos reales de \text{CNBC} fueron clasificados correctamente. El *F1-score* de 0.590 refleja este desempeño todavía limitado, aunque considerablemente mejor que el del modelo base.
+
+Para \text{Reuters}, el modelo alcanza los mejores resultados generales: una *precision* de 0.871, un *recall* de 0.897 y un *F1-score* de 0.884. La matriz de confusión muestra que el 89.7 % de los artículos reales de Reuters fueron correctamente clasificados, lo que coincide con su *recall*. Además, la *precision* elevada indica que la mayoría de los artículos predichos como \text{Reuters} efectivamente pertenecen a ese medio. Aun así, esta clase sigue recibiendo una cantidad importante de errores provenientes de \text{CNBC}: 285 artículos reales de \text{CNBC} fueron clasificados como \text{Reuters}.
+
+En el caso de \text{The New York Times}, el *recall* es alto, igual a 0.847, lo que indica que el modelo logra identificar correctamente la mayor parte de los artículos reales de este medio. Esto también se observa en la Figura \ref{fig-mnb-matriz}, donde 714 de 843 artículos reales aparecen en la diagonal. Su *precision*, de 0.738, es menor que su *recall*, lo que implica que dentro de los artículos predichos como \text{The New York Times\text{ hay una proporción no despreciable de textos que en realidad pertenecen a otros medios. El *F1-score* de 0.789 resume este balance entre una buena capacidad de recuperación y una *precision* más moderada.
+
+En conjunto, la Tabla\ref{metricas-final-mnb} confirma la mejora del modelo final respecto del Multinomial Naive Bayes base. El ajuste de *alpha* permite que el modelo deje de concentrar casi todas sus predicciones en Reuters y mejore especialmente el *recall* de CNBC y The New York Times. Sin embargo, las métricas también muestran que la clasificación no es igualmente buena para todos los medios: Reuters sigue siendo la clase mejor resuelta, mientras que CNBC continúa siendo la más difícil, tanto por su menor *recall* como por su *F1-score* más bajo.
+
+En conclusión, al comparar comparar con el modelo Multinomial Naive Bayes base, el ajuste del hiperparámetro *alpha* permite mejorar el desempeño general y, en particular, la recuperación de las clases minoritarias. Sin embargo, persisten confusiones relevantes entre \text{CNBC} y \text{Reuters}, lo que sugiere que estas clases son más difíciles de separar mediante este modelo.
+
+**limitaciones de usar Bag of Words o TF-IDF:**
+
+Una limitación importante de los modelos basados en Bag of Words o TF-IDF es que representan los textos como bolsas de términos, por lo que ignoran el orden de las palabras y buena parte del contexto lingüístico. Dos frases con sentidos distintos pueden terminar teniendo representaciones muy parecidas si contienen las mismas palabras. Por ejemplo, estas técnicas no capturan bien negaciones, relaciones sintácticas, ironía, tono ni dependencias de largo alcance entre términos.
+
+Otra limitación es que estas representaciones trabajan principalmente con coincidencias superficiales de vocabulario. En consecuencia, pueden asignar mucho peso a marcas de estilo, formato o edición, como firmas, fórmulas periodísticas, nombres propios recurrentes o expresiones típicas de un medio, aunque esas palabras no representen necesariamente diferencias temáticas profundas. En este trabajo, esto es especialmente relevante porque los medios pueden distinguirse no solo por los temas que cubren, sino también por convenciones de redacción, plantillas editoriales y formas de citar fuentes.
+
+Además, tanto Bag of Words como TF-IDF generan matrices de muy alta dimensionalidad y muy dispersas: cada palabra o n-grama se convierte en una variable, pero cada artículo utiliza solo una pequeña parte del vocabulario total. Esto puede volver al modelo sensible a términos raros, errores de limpieza, variantes morfológicas o expresiones poco frecuentes. Aunque TF-IDF reduce el peso de palabras demasiado comunes y destaca términos más distintivos, sigue sin comprender el significado semántico de las palabras ni la similitud entre términos relacionados.
+
+Por estas razones, los resultados obtenidos deben interpretarse como la capacidad del modelo para explotar patrones léxicos presentes en los textos, más que como una comprensión profunda del contenido periodístico. Técnicas más avanzadas, como embeddings de palabras o modelos basados en transformers, podrían capturar relaciones semánticas y contextuales más ricas, aunque a costa de mayor complejidad computacional y menor interpretabilidad directa.
+
+
+
 
 ## 4. Modelo alternativo
 Evalúe al menos un modelo más (dentro de scikit-learn) aparte de *Multinomial Naive Bayes* para clasificar el texto utilizando las mismas *features* de texto.
@@ -898,13 +1264,13 @@ Explique brevemente cómo funciona y compare los resultados con el anterior.
 ```{python}
 # Regresión logística multinomial con regularización L2 (por defecto en sklearn),
 # entrenada sobre las mismas features TF-IDF
-logreg = LogisticRegression(max_iter=1000, C=1.0)
-logreg.fit(X_train_model, y_train)
+logreg = LogisticRegression(max_iter=1000, C=1.0);
+logreg.fit(X_train_model, y_train);
 
-y_pred_lr = logreg.predict(X_test_model)
+y_pred_lr = logreg.predict(X_test_model);
 
-acc_lr = accuracy_score(y_test, y_pred_lr)
-print(f"Accuracy en test: {acc_lr:.3f}")
+acc_lr = accuracy_score(y_test, y_pred_lr);
+#print(f"Accuracy en test: {acc_lr:.3f}")
 ```
 
 ```{python}
@@ -913,17 +1279,49 @@ print(f"Accuracy en test: {acc_lr:.3f}")
 #| fig-align: center
 #| fig-pos: "H"
 
-fig, ax = plt.subplots(figsize=(5.5, 4.5))
-ConfusionMatrixDisplay.from_predictions(
+# Matriz de confusión en cantidades absolutas
+cm_abs_lr = confusion_matrix(
     y_test,
     y_pred_lr,
-    ax=ax,
+    labels=logreg.classes_
+);
+
+# Normalización por fila:
+# cada fila representa el 100% de los artículos reales de ese medio
+cm_pct_lr = cm_abs_lr / cm_abs_lr.sum(axis=1, keepdims=True) * 100;
+
+# Texto de cada celda: cantidad absoluta y porcentaje
+annot_lr = np.empty_like(cm_abs_lr).astype(str);
+
+for i in range(cm_abs_lr.shape[0]):
+    for j in range(cm_abs_lr.shape[1]):
+        annot_lr[i, j] = f"{cm_abs_lr[i, j]}\n({cm_pct_lr[i, j]:.1f}%)";
+
+fig, ax = plt.subplots(figsize=(7.5, 5.8));
+
+sns.heatmap(
+    cm_pct_lr,
+    annot=annot_lr,
+    fmt="",
     cmap="Blues",
-    colorbar=False,
-    xticks_rotation=45
-)
-ax.set_xlabel("Predicción")
-ax.set_ylabel("Medio real")
+    xticklabels=logreg.classes_,
+    yticklabels=logreg.classes_,
+    vmin=0,
+    vmax=100,
+    cbar=True,
+    cbar_kws={"label": "Porcentaje dentro del medio real (%)"},
+    linewidths=0.5,
+    linecolor="white",
+    ax=ax
+);
+
+ax.set_xlabel("Predicción");
+ax.set_ylabel("Medio real");
+ax.set_title(f"Matriz de confusión - Regresión logística multinomial \nAccuracy test = {acc_lr:.3f}");
+
+plt.xticks(rotation=45, ha="right");
+plt.yticks(rotation=0);
+
 plt.tight_layout()
 plt.show()
 ```
@@ -936,24 +1334,37 @@ reporte_lr = classification_report(
     y_pred_lr,
     output_dict=True
 )
+
 tabla_lr = (
-    pd.DataFrame(reporte_lr).T
+    pd.DataFrame(reporte_lr)
+    .T
     .loc[list(logreg.classes_), ["precision", "recall", "f1-score"]]
-    .round(3)
+    .rename(columns={
+        "precision": "Precision",
+        "recall": "Recall",
+        "f1-score": "F1-score"
+    })
 )
 
-latex_lr = tabla_lr.to_latex(
-    index=True,
-    escape=True,
-    caption="Precision, recall y F1 por medio (regresión logística multinomial).",
-    label="tab:metricas-logreg",
-    column_format="lccc"
+tabla_lr.index.name = "Medio"
+
+tabla_lr["Precision"] = tabla_lr["Precision"].map(lambda x: f"{x:.3f}")
+tabla_lr["Recall"] = tabla_lr["Recall"].map(lambda x: f"{x:.3f}")
+tabla_lr["F1-score"] = tabla_lr["F1-score"].map(lambda x: f"{x:.3f}")
+
+print(
+    tabla_lr.to_latex(
+        index=True,
+        escape=True,
+        caption="Precision, recall y F1 por medio (regresión logística multinomial).",
+        label="tab:metricas-logreg",
+        column_format="lccc",
+        position="H"
+    ).replace(
+        "\\begin{table}[H]",
+        "\\begin{table}[H]\n\\centering"
+    )
 )
-latex_lr = latex_lr.replace(
-    "\\begin{table}",
-    "\\begin{table}[H]\n\\centering"
-)
-print(latex_lr)
 ```
 
 Una ventaja de la regresión logística frente al Naive Bayes es que sus coeficientes son fácilmente interpretables. La matriz `logreg.coef_` tiene una fila por medio y una columna por palabra, y el coeficiente asociado a cada palabra indica cuánto empuja su presencia la predicción hacia ese medio. En la Figura \ref{fig-coef-logreg} se muestran, para cada medio, las palabras con mayor coeficiente positivo, es decir, las más relevantes a la hora de clasificar.
@@ -1046,7 +1457,7 @@ Evalúe el problema cambiando al menos un medio de prensa.
 En particular, observe el (des)balance de datos y los problemas que pueda generar, así como cualquier indicio que pueda ver en el mapeo previo con PCA.
 Puede ser útil comentar acerca de técnicas como sobre-muestreo y submuestreo; no es necesario implementarlas.
 
-```{pyhton}
+```{python}
 # TODO: Seleccione una combinación diferente de tres medios de prensa (cambiando al menos uno)
 # y repita el proceso de entrenamiento y evaluación.
 
@@ -1064,7 +1475,7 @@ No se espera que implemente nada en esta parte.
 ## 7. Opcional: Clasificación a nivel de título
 Repita la clasificación con los tres medios de prensa originales, pero esta vez clasificando a nivel de **título** en lugar de artículo completo.
 
-```{pyhton}
+```{python}
 # Opcional: Repita el pipeline de clasificación utilizando el título del artículo
 # en lugar del cuerpo del texto.
 
