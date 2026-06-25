@@ -21,12 +21,12 @@ execute:
 ```{r}
 library(reticulate)
 
-use_python(
-    "C:/Users/facur/anaconda3/envs/fertcast/python.exe",
-    required = TRUE
-)
+# use_python(
+#     "C:/Users/facur/anaconda3/envs/fertcast/python.exe",
+#     required = TRUE
+# )
 
-#Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
+Sys.setenv(RETICULATE_PYTHON = here::here(".venv/bin/python"))
 
 ```
 
@@ -163,9 +163,9 @@ tabla_ca = df_ca.pivot_table(
 );
 ```
 
-\vspace{-1.25cm} En este trabajo se busca construir un modelo de clasificación de texto capaz de predecir a qué medio de prensa pertenece un artículo periodístico a partir únicamente de su contenido textual. Para esto se utiliza un subconjunto del dataset *All the News 2.1 -- Component One*, que reúne artículos de distintos medios junto con los metadatos asociados a cada publicación. 
+\vspace{-1.25cm} En este trabajo se busca construir un modelo de clasificación de texto capaz de predecir a qué medio de prensa pertenece un artículo periodístico a partir únicamente de su contenido textual. Para esto se utiliza un subconjunto del dataset *All the News 2.1 -- Component One*, que reúne artículos de distintos medios junto con los metadatos asociados a cada publicación. Todo el material y código utilizado para llevar a cabo este trabajo, así como también otros análisis previos, se pueden encontrar en el siguiente [link](https://github.com/ceciliawaks/Intro-CD) al repositorio de Github.
 
-El análisis exploratorio que se realizó previamente sobre estos mismos datos ya había dejado algunas señales útiles para esta etapa. La primera es el fuerte desbalance en la cantidad de artículos entre medios (Figura \ref{fig-top-medios}): \texttt{Reuters} concentra una porción muy superior al resto, algo que conviene tener presente tanto al entrenar los modelos como, sobre todo, al interpretar sus métricas. La segunda es que los propios artículos suelen incluir pistas directas de su origen, como menciones al nombre del medio, direcciones web o firmas editoriales, que de no removerse podrían facilitar la tarea de forma artificial. La tercera es que, aunque los medios comparten temáticas transversales como la política estadounidense, mostraban perfiles de vocabulario diferenciados. Esto último quedaba resumido en el análisis de correspondencias entre medios y términos frecuentes (Figura \ref{fig-ca}): \texttt{Reuters} y \texttt{CNBC} aparecían próximos entre sí y ligados a un lenguaje económico e internacional, mientras que \texttt{The New York Times} se inclinaba hacia la política y hacia temas más cercanos a la vida cotidiana y la cultura. Estas diferencias sugieren, ya de entrada, que habrá medios más fáciles de distinguir que otros.
+El análisis exploratorio que se realizó previamente sobre estos mismos datos ya había dejado algunas señales útiles para esta etapa. La primera es el fuerte desbalance en la cantidad de artículos entre medios (Figura \ref{fig-top-medios}): \texttt{Reuters} concentra una porción muy superior al resto, algo que conviene tener presente tanto al entrenar los modelos como, sobre todo, al interpretar sus métricas. La segunda es que los propios artículos suelen incluir pistas directas de su origen, como menciones al nombre del medio, direcciones web o firmas editoriales, que de no removerse podrían facilitar la tarea de forma artificial. La tercera es que, aunque los medios comparten temáticas transversales como la política estadounidense, muestran perfiles de vocabulario diferenciados. Esto último queda resumido en el análisis de correspondencias entre medios y términos frecuentes (Figura \ref{fig-ca}): \texttt{Reuters} y \texttt{CNBC} aparecen próximos entre sí y ligados a un lenguaje económico e internacional, mientras que \texttt{The New York Times} se inclina hacia la política y hacia temas más cercanos a la vida cotidiana y la cultura. Estas diferencias sugieren, desde un principio, que habrá medios más fáciles de distinguir que otros.
 
 ::: {layout-ncol=2}
 ```{python}
@@ -274,7 +274,7 @@ plt.show();
 ```
 :::
 
-En este caso primero se traducirá el texto a una representación numérica con la que un modelo pueda operar, explorando técnicas como *bag of words* y *TF-IDF*, y observando mediante una reducción de dimensionalidad hasta qué punto los medios resultan separables. Luego se entrena y evalúa el rendimiento de modelos como *Multinomial Naive Bayes*, midiendo su desempeño con métricas de clasificación.
+En este caso primero se traduce el texto a una representación numérica con la que un modelo pueda operar, explorando técnicas como *bag of words* y *TF-IDF*, y observando mediante una reducción de dimensionalidad hasta qué punto los medios resultan separables. Luego se entrena y evalúa el rendimiento de modelos *Multinomial Naive Bayes*, midiendo su desempeño con métricas de clasificación. Los resultados obtenidos se comparan con los que se obtienen mediante una *Regresión Logística Multinomial*. Por último, se evalúa el efecto del desbalance de clases y se discuten otras técnicas alternativas de extracción de features.
 
 # Dataset y representación numérica de texto
 
@@ -492,7 +492,7 @@ print(tabla_tfidf)
 
 ```
 
-En el primer artículo, la mayoría de las palabras del ejemplo toman valores parecidos, en torno a $0.12$–$0.13$. La excepción es \texttt{reuters}, con un valor mucho menor ($0.01$), y esto se explica por los dos componentes a la vez. Por un lado, su _TF_ es bajo: en ese artículo \texttt{reuters} aparece una sola vez, frente a las cuatro apariciones de palabras como \texttt{los} o \texttt{star}. Por otro, y sobre todo, su _IDF_ también es bajo: \texttt{reuters} figura en una gran cantidad de artículos, algo ya previamente visto, donde \texttt{Reuters} resultó ser el medio con más artículos y el que más se menciona a sí mismo. Al estar tan extendida, la palabra aporta poca información para distinguir un artículo de otro, y la transformación la penaliza en consecuencia.
+En el primer artículo, la mayoría de las palabras del ejemplo toman valores parecidos, en torno a $0.12$ – $0.13$. La excepción es \texttt{Reuters}, con un valor mucho menor ($0.01$), y esto se explica por los dos componentes a la vez. Por un lado, su _TF_ es bajo: en ese artículo \texttt{Reuters} aparece una sola vez, frente a las cuatro apariciones de palabras como \texttt{los} o \texttt{star}. Por otro, y sobre todo, su _IDF_ también es bajo: \texttt{Reuters} figura en una gran cantidad de artículos, algo ya previamente visto, donde \texttt{Reuters} resultó ser el medio con más artículos y el que más se menciona a sí mismo. Al estar tan extendida, la palabra aporta poca información para distinguir un artículo de otro, y la transformación la penaliza en consecuencia.
 
 ## 4. Visualización PCA
 
@@ -796,7 +796,7 @@ Se entrena entonces un modelo Multinomial Naive Bayes base, el cual define sus p
 
 Se obtiene el *accuracy* del modelo y distintas medidas del desempeño en las predicciones para cada uno de los medios de prensa y presentamos la respectiva matriz de confusión.
 
-$$\text{accuracy}=\frac{\text{Cantidad de predicciones correctas}}{\text{Cantidad ttal de predicciones}}$$
+$$\text{accuracy}=\frac{\text{Cantidad de predicciones correctas}}{\text{Cantidad total de predicciones}}$$
 
 ```{python}
 # Features para los modelos: TF-IDF eliminando stop words y referencias directas a los medios
@@ -939,7 +939,7 @@ La validación cruzada permite estimar el desempeño de forma más robusta que c
 
 Se prueba una grilla de 9 valores en escala logarítmica (`[0.001, 0.00316, 0.01, 0.0316, 0.1, 0.316, 1, 3.16, 10]`), apropiada porque el efecto de *alpha* varía por órdenes de magnitud. Se excluye el 0, que equivale a no aplicar suavizado y puede generar probabilidades nulas en clasificación de texto. Para cada valor se entrena un modelo y se elige el mejor según su *accuracy* promedio.
 
-```{python, eval=FALSE}
+```{python}
 alphas = np.array([ 0.001, 0.00316, 0.01, 0.0316, 0.1, 0.316, 1]); #equivalente a alphas = np.logspace(-3, 1, 9)
 
 # from sklearn.model_selection import StratifiedKFold # agregar a 
@@ -974,7 +974,7 @@ grid_mnb.fit(X_train_model, y_train);
 ```
 
 
-```{python, eval=FALSE}
+```{python}
 #| label: fig-mnb-cv
 #| fig-cap: "Distribución del accuracy por valor de alpha Multinomial Naive Bayes con validación cruzada."
 #| fig-align: center
@@ -1070,7 +1070,7 @@ plt.show()
 La Figura \ref{fig-mnb-cv} muestra la distribución del *accuracy* por valor de *alpha*: cada punto negro es un pliegue y el rombo blanco, su media.
 
 
-```{python, eval=FALSE}
+```{python}
 #| results: asis
 
 tabla_resultados_mnb = (
@@ -1110,7 +1110,7 @@ El mejor valor según el *accuracy* promedio es *alpha* = 0.0316 (accuracy de 0.
 
 Con el mejor valor del hiperparámetro (`alpha = 0.0316`) se reentrena el modelo final sobre todo el conjunto de entrenamiento y se evalúa sobre el conjunto de test, que no se usó durante el ajuste, para obtener una estimación realista de su desempeño sobre datos no observados.
 
-```{python, eval=FALSE}
+```{python}
 mejor_alpha = grid_mnb.best_params_["alpha"];
 
 # Entrenamiento final del modelo con el mejor alpha
@@ -1129,7 +1129,7 @@ accuracy_final_mnb = accuracy_score(y_test, y_pred_final_mnb);
 ```
 
 
-```{python, eval=FALSE}
+```{python}
 #| label: fig-mnb-matriz
 #| fig-cap: "Matriz de confusión normalizada por medio real para el modelo final Multinomial Naive Bayes."
 #| fig-align: center
@@ -1183,7 +1183,7 @@ plt.show()
 
 El modelo final alcanza un *accuracy* en test cercano a 0.82 y, como muestra la Figura \ref{fig-mnb-matriz}, mejora notablemente la clasificación de \texttt{CNBC} y \texttt{The New York Times} respecto del modelo base. \texttt{Reuters} sigue siendo el medio mejor clasificado, aunque ahora concentra menos predicciones. \texttt{CNBC} continúa siendo el más difícil: gran parte de sus artículos se predicen como \texttt{Reuters}, algo atribuible tanto a su menor cantidad de artículos como a que comparte características léxicas con \texttt{Reuters} en la representación TF-IDF.
 
-```{python, eval=FALSE}
+```{python}
 #| results: asis
 
 reporte_final_mnb = classification_report(
@@ -1428,7 +1428,7 @@ Las palabras seguidas no son casuales: son las mismas que ya habían aparecido c
 
 Para cerrar, se comparan directamente los dos clasificadores entrenados sobre las mismas *features* TF-IDF: el modelo final Multinomial Naive Bayes (Sección 3, con `alpha = 0.0316`) y la regresión logística multinomial recién ajustada. El Cuadro \ref{tab:comparacion-modelos} resume su desempeño sobre el conjunto de test.
 
-```{python, eval=FALSE}
+```{python}
 #| results: asis
 
 filas = []
