@@ -1,0 +1,162 @@
+---
+title: |
+  \vspace{-1.5cm}
+  Trabajo Final
+subtitle: "Introducción a la Ciencia de Datos 2026"
+author: "Grupo 8: Facundo Morini, Cecilia Waksman"
+format:
+  pdf:
+    fig-pos: H
+    geometry: margin=2.3cm
+    include-in-header:
+      text: |
+        \usepackage{booktabs}
+lang: es
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(forcats)
+library(patchwork)
+library(scales)
+library(kableExtra)
+
+df <- read.csv("Trabajo_AES_24/datos/dhs_6_7.csv")
+```
+
+\vspace{-1cm}
+
+Al trabajar con encuestas demográficas y de salud, una dimensión de interés es el momento en que las mujeres inician ciertas trayectorias vinculadas a la fecundidad, como el comienzo de la vida sexual o la edad al primer hijo. Estas variables no dependen únicamente de decisiones individuales, sino que están atravesadas por factores educativos, socioeconómicos, culturales y de acceso a información. En este trabajo se propone utilizar herramientas de ciencia de datos para caracterizar y, eventualmente, predecir el inicio temprano de la vida sexual.
+
+# Juego de datos y problemas de calidad
+
+Los datos provienen del programa DHS (*Demographic and Health Surveys*), un sistema internacional de encuestas demográficas y de salud realizado principalmente en países en desarrollo, que busca producir información comparable y representativa sobre fecundidad, planificación familiar, salud materna e infantil, entre otros temas sanitarios. Se utiliza un conjunto ya armonizado de las rondas VI y VII, con aproximadamente 104.000 observaciones y 30 variables, correspondientes a mujeres de entre 15 y 59 años encuestadas entre 2008 y 2018 en siete países de contextos diversos: Albania, Armenia (Europa del Este); Guatemala, Perú, República Dominicana (América Latina y el Caribe); y Etiopía, Sudáfrica (África). El conjunto incluye identificadores, variables del diseño muestral, características del hogar, educación, riqueza, acceso a medios, conocimiento y uso de anticonceptivos, edad al primer hijo, edad a la primera relación sexual, cantidad de uniones y número de parejas sexuales, entre otras.
+
+Al tratarse de datos de encuesta se cuenta con un diccionario de variables y categorías codificadas, pero antes de cualquier modelado es imprescindible una revisión de calidad y descripción de los datos. Entre los principales problemas encontrados se encuentran:
+
+**Datos faltantes y códigos especiales.** Varias variables presentan valores faltantes (Tabla \ref{tab:tabla-na}, Figura \ref{fig-calidad}). No todos los faltantes indican mala calidad: que la edad al primer hijo sea nula puede significar que la mujer aún no tuvo hijos, y algo similar ocurre con variables vinculadas a pareja o uniones. Además, los faltantes no siempre se presentan como celdas vacías: la encuesta declara la no respuesta con códigos fuera del recorrido esperado (97, 98 y 99) en variables como la edad a la primera relación sexual, el número ideal de hijos, los años de educación de la pareja y el número de parejas sexuales. Si estos códigos se tratan como valores numéricos reales, distorsionan las estimaciones.
+
+```{r tabla-na, results='asis'}
+esp <- list(v133=97:99, v531=96:99, v613=50:99, v715=97:99, v836=96:99)
+nombres <- c(v212="Edad al primer hijo", v503="Cantidad de uniones",
+             v715="Educación de la pareja", v836="N.º de parejas sexuales",
+             v717="Ocupación de la mujer", v613="N.º ideal de hijos",
+             v531="Edad a 1.ª relación sexual", v301="Conoc. anticonceptivos",
+             v364="Intención uso anticonc.", v133="Años de educación")
+
+tab <- lapply(names(nombres), function(v){
+  x <- df[[v]]
+  cod <- if (!is.null(esp[[v]])) sum(!is.na(x) & x %in% esp[[v]]) else 0L
+  data.frame(Variable=nombres[[v]], `NA`=sum(is.na(x)), Codigo=cod)
+}) %>% bind_rows()
+tab$Total <- tab$NA. + tab$Codigo
+tab$pct <- round(100*tab$Total/nrow(df), 1)
+tab <- tab %>% filter(Total > 0) %>% arrange(desc(Total))
+
+tab %>% transmute(Variable, `Faltantes (NA)`=NA., `Cód. especial`=Codigo,
+                 `% del total`=pct) %>%
+  kable(caption="Variables con valores faltantes o códigos especiales.",
+        booktabs=TRUE, align="lrrr", format.args=list(big.mark=".")) %>%
+  kable_styling(latex_options=c("striped","hold_position"), font_size=7.5,
+                position="center")
+```
+
+```{r fig-calidad}
+#| label: fig-calidad
+#| fig-cap: "Porcentaje de observaciones faltantes por variable, distinguiendo faltantes reales (NA) de códigos especiales (97/98/99)."
+#| fig-align: center
+#| fig-height: 2.6
+#| fig-width: 5.2
+
+tab %>%
+  transmute(nombre=Variable, `Faltante (NA)`=NA., `Código especial`=Codigo) %>%
+  pivot_longer(-nombre, names_to="tipo", values_to="n") %>%
+  mutate(pct=100*n/nrow(df), nombre=fct_reorder(nombre, pct, sum)) %>%
+  ggplot(aes(pct, nombre, fill=tipo)) +
+  geom_col(width=.7) +
+  scale_fill_manual(values=c("Faltante (NA)"="#2E86C1","Código especial"="#F39C12"),
+                    name=NULL) +
+  labs(x="% de observaciones", y=NULL) +
+  theme_minimal(base_size=10) +
+  theme(legend.position="top", panel.grid.major.y=element_blank())
+```
+
+**No respuesta.** Las preguntas vinculadas a fecundidad, sexualidad o planificación familiar pueden presentar mayor no respuesta por rechazo, desconocimiento o incomodidad, lo cual coincide con las variables más afectadas de la Tabla \ref{tab:tabla-na}. Si la probabilidad de no responder está asociada a características de las mujeres o a la propia variable de interés, un análisis solo sobre casos completos puede producir estimaciones sesgadas y menos representativas.
+
+**Valores inconsistentes.** Deben revisarse reglas básicas: se espera que la edad actual sea mayor o igual a la edad al primer hijo y esta, a su vez, mayor o igual a la edad a la primera relación sexual. Esta cadena se viola en 5 observaciones. También aparecen valores biológicamente imposibles (por ejemplo, edad al primer hijo de 3 años), que deberían tratarse como faltantes.
+
+**Sesgo de respuesta.** Algunas variables recogen comportamientos o preferencias sensibles, por lo que las respuestas pueden verse afectadas por la deseabilidad social. El número ideal de hijos refleja una preferencia declarada condicionada por normas sobre el tamaño de familia o la cantidad actual que la mujer tenga más que un deseo real, y la edad a la primera relación sexual puede ajustarse a lo culturalmente aceptable. Este sesgo no es cuantificable en los datos actuales y solo puede mitigarse en futuras encuestas mediante por ejemplo mejor redacción de preguntas.
+
+**Comparabilidad y diseño muestral.** Los países pertenecen a contextos distintos y las encuestas no son del mismo año, por lo que las diferencias entre países no deben leerse como efectos causales, sino como diferencias agregadas de contexto, medición y composición. Además, las DHS no son muestras simples: usan diseños estratificados por conglomerados con ponderadores, que deberían incorporarse en el análisis exploratorio para obtener descripciones representativas y explicitarse como limitación en la etapa predictiva.
+
+# Pregunta de análisis
+
+La pregunta central que se propone es:
+
+> ¿En qué medida variables educativas, socioeconómicas, de acceso a información y de contexto país permiten predecir si una mujer comenzó su vida sexual antes de los 18 años?
+
+Puede formularse como un problema de **clasificación supervisada** con variable objetivo binaria (inicio antes o a partir de los 18 años) y, como predictores, años de educación, riqueza, zona urbana/rural, país, acceso a medios, conocimiento de anticonceptivos y cantidad de uniones, entre otros. Una pregunta complementaria es modelar la **edad al primer hijo**, por ejemplo mediante un problema de regresión. La utilidad no está en clasificar personas para decidir sobre ellas, sino en identificar patrones agregados que permitan formular hipótesis sobre desigualdades educativas y socioeconómicas vinculadas al inicio de las trayectorias reproductivas.
+
+# Proceso propuesto
+
+**Perfilado y limpieza.** El primer paso es un perfilado (observaciones por país y año, distribución de edades, porcentaje de faltantes, cardinalidad, códigos especiales y consistencia entre edades) y la sustitución por `NA` de códigos especiales, valores fuera de recorrido e inconsistencias. Los faltantes numéricos podrían imputarse por media o mediana y los categóricos por la moda; en la cantidad de parejas sexuales, al no existir el valor 0, los faltantes podrían corresponder a ese valor. Variables con un porcentaje muy alto de faltantes convendría descartarlas. Luego se construye la variable objetivo, filtrando edades inverosímiles y excluyendo variables que introduzcan fuga de información (como la edad exacta a la primera relación sexual una vez binarizada). Para los modelos que lo requieran, las categóricas se transforman con *one-hot encoding* y las numéricas se estandarizan.
+
+**Análisis exploratorio y visualización.** Las visualizaciones deben servir tanto para explorar como para comunicar los patrones más relevantes. La Figura \ref{fig-eda} resume dos hallazgos clave sobre el inicio sexual antes de los 18 años: existe una fuerte heterogeneidad entre países los del Este europeo rondan el 16 %, mientras que en Etiopía, Guatemala o República Dominicana supera el 50 % y un claro gradiente educativo, donde las mujeres que inician su vida sexual antes de los 18 tienden a tener menos años de educación. Patrones análogos se observan por categoría de riqueza y acceso a medios, lo que anticipa la relevancia de estas variables en el modelado.
+
+```{r fig-eda}
+#| label: fig-eda
+#| fig-cap: "Inicio de la vida sexual antes de los 18 años: (a) proporción estimada por país (ponderada); (b) años de educación de la mujer según el momento de inicio."
+#| fig-align: center
+#| fig-height: 2.9
+#| fig-width: 6.2
+
+d <- df %>% mutate(
+  pais = recode(v000, "AL7"="Albania","AM7"="Armenia","ET7"="Etiopía",
+                "GU6"="Guatemala","PE6"="Perú","DR6"="Rep. Dominicana",
+                "ZA7"="Sudáfrica"),
+  w = as.numeric(v005)/1e6,
+  edad_psexo = ifelse(v531 %in% 96:99, NA, v531),
+  anio_educ  = ifelse(v133 %in% 97:99, NA, v133))
+
+psx <- d %>% filter(edad_psexo >= 9, !is.na(edad_psexo), !is.na(anio_educ), !is.na(pais)) %>%
+  mutate(antes18 = ifelse(edad_psexo < 18, 1, 0))
+
+prop_pais <- psx %>% group_by(pais) %>%
+  summarise(p = weighted.mean(antes18, w), .groups="drop") %>%
+  mutate(pais = fct_reorder(pais, p))
+
+pA <- ggplot(prop_pais, aes(p, pais)) +
+  geom_col(fill="#2E86C1", width=.7) +
+  geom_text(aes(label=percent(p, accuracy=1)), hjust=-0.15, size=2.8) +
+  scale_x_continuous(labels=percent, limits=c(0,0.75),
+                     expand=expansion(mult=c(0,.08))) +
+  labs(x="Inicio sexual antes de los 18", y=NULL, subtitle="(a) Por país") +
+  theme_minimal(base_size=10) + theme(panel.grid.major.y=element_blank())
+
+pB <- psx %>% mutate(grp=factor(antes18, labels=c("18 o más","Antes de 18"))) %>%
+  ggplot(aes(grp, anio_educ, fill=grp)) +
+  geom_boxplot(color="grey40", width=.6, outlier.alpha=.1) +
+  scale_fill_manual(values=c("Antes de 18"="#E74C3C","18 o más"="#2E86C1"),
+                    guide="none") +
+  labs(x="Inicio de la vida sexual", y="Años de educación",
+       subtitle="(b) Educación según inicio") +
+  theme_minimal(base_size=10)
+
+pA + pB + plot_layout(widths=c(1.15,1))
+```
+
+**División y modelado.** Para evitar sobreajuste, el conjunto se divide en entrenamiento y testeo (por ejemplo 85 %–15 %), de forma estratificada por país y por la variable objetivo, dado el desbalance entre países y posiblemente entre clases. Para el modelado se comparan modelos de complejidad creciente: una regresión logística, un árbol de decisión y ensambles como *Random Forest* o *Gradient Boosting*. Los hiperparámetros (cantidad de árboles, profundidad, mínimo de observaciones por nodo, variables candidatas por partición) se seleccionan mediante validación cruzada dentro del entrenamiento, reservando el testeo para la evaluación final.
+
+**Evaluación.** Como una clase puede ser más frecuente, la exactitud global no basta. Se propone evaluar matriz de confusión, *accuracy*, precisión y *recall* por clase, F1 y área bajo la curva ROC, además de métricas desagregadas por país, zona y riqueza para detectar si el error se concentra en ciertos grupos. La interpretabilidad se abordaría con importancia de variables y gráficos de dependencia parcial. Como extensión no supervisada, podría aplicarse *clustering* para describir perfiles de mujeres o países, tratando los grupos como herramienta descriptiva.
+
+# Consideraciones éticas
+
+**Privacidad.** El proyecto trabaja con información sensible sobre sexualidad, fecundidad y condiciones socioeconómicas. Los datos incluyen un identificador que pseudo-anonimiza a cada encuestada, pero esta protección puede ser insuficiente: variables como país, edad, región o características del hogar pueden actuar como cuasi-identificadores al combinarse con otras fuentes. Para reforzar el resguardo se proponen técnicas de anonimización: *k-anonymity* (que cada combinación de cuasi-identificadores corresponda al menos a $k$ personas, mediante supresión y generalización), *l-diversity* (garantizar diversidad de los atributos sensibles dentro de cada grupo) y *t-closeness* (que la distribución de esos atributos en cada grupo se asemeje a la del conjunto total). Estos métodos implican un *trade-off* entre privacidad y utilidad que debe evaluarse según la sensibilidad de los datos; en la práctica conviene trabajar solo con las variables necesarias y no reportar cruces con celdas demasiado pequeñas.
+
+**Sesgo y estigma.** Existe el riesgo de reforzar estigmas sobre ciertos países, zonas rurales o grupos socioeconómicos. Por eso los resultados deben presentarse como patrones agregados y condicionados por el diseño de la encuesta, no como características individuales ni relaciones causales, y el desempeño del modelo debe corroborarse por subgrupo para verificar que el error no se concentre en grupos sensibles. Como medidas de mitigación se propone documentar los criterios de filtrado e imputación, explicitar las limitaciones del modelo, evitar su uso para decisiones individuales. El impacto esperado del proyecto es analítico y exploratorio: ayudar a formular nuevas preguntas sobre desigualdades educativas y socioeconómicas, no producir una herramienta automática para clasificar o intervenir sobre mujeres individuales.
